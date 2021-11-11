@@ -90,6 +90,7 @@ from .log import CoroutineLogFormatter, log_request
 from .proxy import Proxy, ConfigurableHTTPProxy
 from .traitlets import URLPrefix, Command, EntryPointType, Callable
 from .utils import (
+    AnyTimeoutError,
     catch_db_error,
     maybe_future,
     url_path_join,
@@ -2069,7 +2070,7 @@ class JupyterHub(Application):
                 if role_spec['name'] == 'admin':
                     app_log.warning(
                         "Configuration specifies both admin_users and users in the admin role specification. "
-                        "If admin role is present in config, c.authenticator.admin_users should not be used."
+                        "If admin role is present in config, c.Authenticator.admin_users should not be used."
                     )
                     app_log.info(
                         "Merging admin_users set with users list in admin role"
@@ -2108,7 +2109,7 @@ class JupyterHub(Application):
                                 )
                         Class = orm.get_class(kind)
                         orm_obj = Class.find(db, bname)
-                        if orm_obj:
+                        if orm_obj is not None:
                             orm_role_bearers.append(orm_obj)
                         else:
                             app_log.info(
@@ -2117,6 +2118,11 @@ class JupyterHub(Application):
                             if kind == 'users':
                                 orm_obj = await self._get_or_create_user(bname)
                                 orm_role_bearers.append(orm_obj)
+                            elif kind == 'groups':
+                                group = orm.Group(name=bname)
+                                db.add(group)
+                                db.commit()
+                                orm_role_bearers.append(group)
                             else:
                                 raise ValueError(
                                     f"{kind} {bname} defined in config role definition {predef_role['name']} but not present in database"
@@ -2350,7 +2356,7 @@ class JupyterHub(Application):
                 continue
             try:
                 await Server.from_orm(service.orm.server).wait_up(timeout=1, http=True)
-            except TimeoutError:
+            except AnyTimeoutError:
                 self.log.warning(
                     "Cannot connect to %s service %s at %s",
                     service.kind,
@@ -2428,7 +2434,7 @@ class JupyterHub(Application):
                 )
                 try:
                     await user._wait_up(spawner)
-                except TimeoutError:
+                except AnyTimeoutError:
                     self.log.error(
                         "%s does not appear to be running at %s, shutting it down.",
                         spawner._log_name,
@@ -2792,7 +2798,7 @@ class JupyterHub(Application):
             await gen.with_timeout(
                 timedelta(seconds=max(init_spawners_timeout, 1)), init_spawners_future
             )
-        except gen.TimeoutError:
+        except AnyTimeoutError:
             self.log.warning(
                 "init_spawners did not complete within %i seconds. "
                 "Allowing to complete in the background.",
@@ -3055,7 +3061,7 @@ class JupyterHub(Application):
                         await Server.from_orm(service.orm.server).wait_up(
                             http=True, timeout=1, ssl_context=ssl_context
                         )
-                    except TimeoutError:
+                    except AnyTimeoutError:
                         if service.managed:
                             status = await service.spawner.poll()
                             if status is not None:
