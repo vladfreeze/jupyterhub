@@ -1129,7 +1129,7 @@ class JupyterHub(Application):
 
     @default('authenticator')
     def _authenticator_default(self):
-        return self.authenticator_class(parent=self, db=self.db)
+        return self.authenticator_class(parent=self, _deprecated_db_session=self.db)
 
     implicit_spawn_seconds = Float(
         0,
@@ -1317,11 +1317,14 @@ class JupyterHub(Application):
 
     admin_access = Bool(
         False,
-        help="""Grant admin users permission to access single-user servers.
+        help="""DEPRECATED since version 2.0.0.
 
-        Users should be properly informed if this is enabled.
+        The default admin role has full permissions, use custom RBAC scopes instead to
+        create restricted administrator roles.
+        https://jupyterhub.readthedocs.io/en/stable/rbac/index.html
         """,
     ).tag(config=True)
+
     admin_users = Set(
         help="""DEPRECATED since version 0.7.2, use Authenticator.admin_users instead."""
     ).tag(config=True)
@@ -1699,7 +1702,9 @@ class JupyterHub(Application):
             for authority, files in self.internal_ssl_authorities.items():
                 if files:
                     self.log.info("Adding CA for %s", authority)
-                    certipy.store.add_record(authority, is_ca=True, files=files)
+                    certipy.store.add_record(
+                        authority, is_ca=True, files=files, overwrite=True
+                    )
 
             self.internal_trust_bundles = certipy.trust_from_graph(
                 self.internal_ssl_components_trust
