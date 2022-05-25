@@ -650,7 +650,7 @@ class Authenticator(LoggingConfigurable):
             user (User): The User wrapper object
         """
         
-        print("111111111111111","AYYYYYYYYY")
+        print("### auth.py - add_user_to_groups")
         
 
         try:   
@@ -702,7 +702,7 @@ class Authenticator(LoggingConfigurable):
             print(orm_user.groups)
     
             for group in [group.name for group in orm_user.groups]:
-                print("Checking if group is in grouplist")
+                print("Checking if group is in grouplist: ", group)
                 if group not in groupid_list:
 
                     print("Group not in grouplist")
@@ -716,7 +716,7 @@ class Authenticator(LoggingConfigurable):
             pass
         
         db.commit()
-        print("111111111111111 END     AYYYYYYYYY")
+        print("### END auth.py - add_user_to_groups")
        
 
 
