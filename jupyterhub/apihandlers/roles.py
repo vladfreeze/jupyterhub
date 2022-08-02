@@ -9,6 +9,7 @@ from tornado import web
 from .. import orm
 from ..scopes import Scope, needs_scope
 from .base import APIHandler
+from .groups import GroupAPIHandler
 
 
 class _RoleAPIHandler(APIHandler):
@@ -78,14 +79,23 @@ class RoleAPIHandler(_RoleAPIHandler):
             # Non existing groups are ignored and won't be created
             if existing is not None:
                 groups.append(existing)
+            else:
+                self.log.info(f"Creating group {name}")
+                group = orm.Group(name=name)
+                self.db.add(group)
+                self.db.commit()
+                self.write(json.dumps(self.group_model(group)))
+                existing = orm.Group.find(self.db, name=name)
+                groups.append(existing)
+
 
         # create the role
         self.log.info("Creating new role %s with %i scopes", role_name, len(scopes))
         self.log.debug("Scopes: %s", scopes)
+        self.log.debug("Groups: %s", groups)
         role = orm.Role(
             name=role_name, scopes=scopes, groups=groups, services=services, users=users
         )
-        print(role)
         self.db.add(role)
         self.db.commit()
         self.write(json.dumps(self.role_model(role)))
@@ -133,6 +143,14 @@ class RoleAPIHandler(_RoleAPIHandler):
             existing = orm.Group.find(self.db, name=name)
             # Non existing groups are ignored and won't be created
             if existing is not None:
+                groups.append(existing)
+            else:
+                self.log.info(f"Creating group {name}")
+                group = orm.Group(name=name)
+                self.db.add(group)
+                self.db.commit()
+                self.write(json.dumps(self.group_model(group)))
+                existing = orm.Group.find(self.db, name=name)
                 groups.append(existing)
 
         # create the role
