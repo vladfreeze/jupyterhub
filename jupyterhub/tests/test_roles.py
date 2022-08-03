@@ -979,34 +979,6 @@ async def test_user_group_roles(app, create_temp_role):
     assert len(reply['roles']) == 1
     assert group_role.name not in reply['roles']
 
-
-async def test_config_role_list():
-    roles_to_load = [
-        {
-            'name': 'elephant',
-            'description': 'pacing about',
-            'scopes': ['read:hub'],
-        },
-        {
-            'name': 'tiger',
-            'description': 'pouncing stuff',
-            'scopes': ['shutdown'],
-        },
-    ]
-    hub = MockHub(load_roles=roles_to_load)
-    hub.init_db()
-    hub.authenticator.admin_users = ['admin']
-    await hub.init_role_creation()
-    for role_conf in roles_to_load:
-        assert orm.Role.find(hub.db, name=role_conf['name'])
-    # Now remove elephant from config and see if it is removed from database
-    roles_to_load.pop(0)
-    hub.load_roles = roles_to_load
-    await hub.init_role_creation()
-    assert orm.Role.find(hub.db, name='tiger')
-    assert not orm.Role.find(hub.db, name='elephant')
-
-
 async def test_config_role_users():
     role_name = 'painter'
     user_name = 'benny'
@@ -1119,27 +1091,6 @@ async def test_custom_role_reset():
     assert user_role in user.roles
     assert 'shutdown' not in user_role.scopes
 
-
-async def test_removal_config_to_db():
-    role_spec = [
-        {
-            'name': 'user',
-            'scopes': ['self', 'shutdown'],
-        },
-        {
-            'name': 'wizard',
-            'scopes': ['self', 'read:groups'],
-        },
-    ]
-    hub = MockHub(load_roles=role_spec)
-    hub.init_db()
-    await hub.init_role_creation()
-    assert orm.Role.find(hub.db, 'user')
-    assert orm.Role.find(hub.db, 'wizard')
-    hub.load_roles = []
-    await hub.init_role_creation()
-    assert orm.Role.find(hub.db, 'user')
-    assert not orm.Role.find(hub.db, 'wizard')
 
 
 async def test_no_admin_role_change():

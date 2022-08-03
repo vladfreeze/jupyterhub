@@ -84,7 +84,6 @@ class RoleAPIHandler(_RoleAPIHandler):
                 group = orm.Group(name=name)
                 self.db.add(group)
                 self.db.commit()
-                self.write(json.dumps(self.group_model(group)))
                 existing = orm.Group.find(self.db, name=name)
                 groups.append(existing)
 
@@ -99,6 +98,7 @@ class RoleAPIHandler(_RoleAPIHandler):
         self.db.add(role)
         self.db.commit()
         self.write(json.dumps(self.role_model(role)))
+        self.log.info(json.dumps(self.role_model(role)))
         self.set_status(201)
 
     @needs_scope('admin:groups')
@@ -149,7 +149,6 @@ class RoleAPIHandler(_RoleAPIHandler):
                 group = orm.Group(name=name)
                 self.db.add(group)
                 self.db.commit()
-                self.write(json.dumps(self.group_model(group)))
                 existing = orm.Group.find(self.db, name=name)
                 groups.append(existing)
 
