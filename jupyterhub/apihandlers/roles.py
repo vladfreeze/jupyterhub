@@ -9,6 +9,7 @@ from tornado import web
 from .. import orm
 from ..scopes import Scope, needs_scope
 from .base import APIHandler
+from .groups import GroupAPIHandler
 
 
 class _RoleAPIHandler(APIHandler):
@@ -49,11 +50,10 @@ class RoleAPIHandler(_RoleAPIHandler):
         servicenames = model.get('services', [])
         usernames = model.get('users', [])
         groupnames = model.pop("groups", [])
-        # check if scopes exist
+        #check if scopes exist
         if scopes:
             # avoid circular import
             from ..scopes import _check_scopes_exist
-
             try:
                 _check_scopes_exist(scopes, who_for=f"role {role_name}")
             except:
@@ -79,17 +79,26 @@ class RoleAPIHandler(_RoleAPIHandler):
             # Non existing groups are ignored and won't be created
             if existing is not None:
                 groups.append(existing)
+            else:
+                self.log.info(f"Creating group {name}")
+                group = orm.Group(name=name)
+                self.db.add(group)
+                self.db.commit()
+                existing = orm.Group.find(self.db, name=name)
+                groups.append(existing)
+
 
         # create the role
         self.log.info("Creating new role %s with %i scopes", role_name, len(scopes))
         self.log.debug("Scopes: %s", scopes)
+        self.log.debug("Groups: %s", groups)
         role = orm.Role(
             name=role_name, scopes=scopes, groups=groups, services=services, users=users
         )
-        print(role)
         self.db.add(role)
         self.db.commit()
         self.write(json.dumps(self.role_model(role)))
+        self.log.info(json.dumps(self.role_model(role)))
         self.set_status(201)
 
     @needs_scope('admin:groups')
@@ -109,11 +118,10 @@ class RoleAPIHandler(_RoleAPIHandler):
         servicenames = model.get('services', [])
         usernames = model.get('users', [])
         groupnames = model.pop("groups", [])
-        # check if scopes exist
+        #check if scopes exist
         if scopes:
             # avoid circular import
             from ..scopes import _check_scopes_exist
-
             try:
                 _check_scopes_exist(scopes, who_for=f"role {role_name}")
             except:
@@ -135,6 +143,13 @@ class RoleAPIHandler(_RoleAPIHandler):
             existing = orm.Group.find(self.db, name=name)
             # Non existing groups are ignored and won't be created
             if existing is not None:
+                groups.append(existing)
+            else:
+                self.log.info(f"Creating group {name}")
+                group = orm.Group(name=name)
+                self.db.add(group)
+                self.db.commit()
+                existing = orm.Group.find(self.db, name=name)
                 groups.append(existing)
 
         # create the role
