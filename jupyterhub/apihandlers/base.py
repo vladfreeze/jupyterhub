@@ -367,6 +367,22 @@ class APIHandler(BaseHandler):
         model = self._filter_model(model, access_map, group, 'group')
         return model
 
+    def role_model(self, role):
+        """Get the JSON model for a Role object"""
+        model = {
+            'kind': 'role',
+            'name': role.name,
+            'groups': [g.name for g in role.groups],
+            'users': [u.name for u in role.users],
+            'scopes': [s for s in role.scopes],
+            'services': [s.name for s in role.services],
+        }
+        access_map = {
+            'read:roles': {'kind', 'name', 'users', 'scopes', 'groups', 'services'},
+        }
+        model = self._filter_model(model, access_map, role, 'role')
+        return model
+
     def service_model(self, service):
         """Get the JSON model for a Service object"""
         model = {
@@ -408,7 +424,13 @@ class APIHandler(BaseHandler):
     }
 
     _group_model_types = {'name': str, 'users': list, 'roles': list}
-
+    _role_model_types = {
+        'name': str,
+        'users': list,
+        'groups': list,
+        'scopes': list,
+        'services': list,
+    }
     def _check_model(self, model, model_types, name):
         """Check a model provided by a REST API request
 
@@ -446,7 +468,15 @@ class APIHandler(BaseHandler):
                 raise web.HTTPError(
                     400, ("group names must be str, not %r", type(groupname))
                 )
-
+    def _check_role_model(self, model):
+        """Check a request-provided role model from a REST API"""
+        self._check_model(model, self._role_model_types, 'role')
+        for rolename in model.get('roles', []):
+            if not isinstance(rolename, str):
+                raise web.HTTPError(
+                    400, ("Role names must be str, not %r", type(rolename))
+                )
+                
     def get_api_pagination(self):
         default_limit = self.settings["api_page_default_limit"]
         max_limit = self.settings["api_page_max_limit"]
