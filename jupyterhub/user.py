@@ -336,6 +336,62 @@ class User:
             self.groups = []
         self.db.commit()
 
+    def getRoleNames(role_list):
+        return [role['name'] for role in role_list]
+
+    def searchForRole(role_list, role_name):
+        return [role for role in role_list if role['name']== role_name]
+
+    def sync_roles(self, new_roles):
+        """Synchronize roles with database"""
+        print(">>>>>>>>> >>DEBUG SYNC_ROLES<< <<<<<<<<<<<")
+        current_roles = {g.name for g in self.db.roles}
+        print(new_roles)
+        new_roles_names = getRoleNames(new_roles)
+        print(new_roles_names)
+        #if current_roles == new_roles_names:
+        #    # no change, nothing to do
+        #    return
+
+        # log role changes
+        new_roles_names = set(roles).difference(current_roles)
+        removed_roles = current_roles.difference(roles)
+        if new_roles_names:
+            self.log.info(f"Adding new roles {new_roles_names} to the database")
+        if removed_roles:
+            self.log.info(f"Removing new role {removed_roles} to the database")
+
+        if new_roles_names:
+            roles = (
+                self.db.query(orm.Role).filter(orm.Role.in_(new_roles_names)).all()
+            )
+            existing_roles = {g for g in roles}
+            for role_name in new_roles:
+                if role_name not in existing_roles:
+                    # create roles that don't exist yet
+                    self.log.info(
+                        f"Creating new role {role_name}"
+                    )
+
+                    role = searchForRole(new_roles,role_name)
+                    if 'name' in role.keys():
+                        role_name= role['name']
+                    if 'scopes' in role.keys():
+                        scopes= role['scopes']
+                    if 'groups' in role.keys():
+                        groups= role['groups']
+                    if 'services' in role.keys():    
+                        services= role['services']
+                    if 'users' in role.keys():
+                        users = role['users']
+                    role = orm.Role(name=role_name, scopes=scopes, groups=groups, services=services, users=users)
+                    self.db.add(role)
+                    roles.append(role)
+            self.roles = roles
+        else:
+            self.roles = []
+        self.db.commit()
+
     async def save_auth_state(self, auth_state):
         """Encrypt and store auth_state"""
         if auth_state is None:
