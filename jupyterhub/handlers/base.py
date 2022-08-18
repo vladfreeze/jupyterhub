@@ -786,10 +786,8 @@ class BaseHandler(RequestHandler):
 
         # apply authenticator-managed roles       
         if self.authenticator.manage_roles:
-            print("manage_roles is TRUE!!!!!")
             print(authenticated)
             auth_roles = authenticated.get("roles")
-            print(auth_roles)
             if auth_roles is not None:
                 user.sync_roles(auth_roles)
 

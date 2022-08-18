@@ -359,7 +359,7 @@ class User:
         if new_roles_names:
             self.log.info(f"Adding new roles {new_roles_names} to the database")
         if removed_roles:
-            self.log.info(f"Removing new role {removed_roles} to the database")
+            self.log.info(f"Removing new role {removed_roles} from the database")
 
         if auth_roles:
             roles = (
@@ -382,19 +382,35 @@ class User:
                     scopes = []
                     if 'scopes' in role.keys():
                         scopes= role['scopes']
+                        from .scopes import _check_scopes_exist
+                        try:
+                            _check_scopes_exist(scopes, who_for=f"role {role_name}")
+                        except:
+                            raise web.HTTPError(409, "One of the scopes does not exist")
+                        
                     groups = []
                     if 'groups' in role.keys():
-                        groups= role['groups']
+                        for group_name in role['groups']:
+                            group= orm.Group.find(self.db,group_name)
+                            if group is not None:
+                                groups.append(group)
+
                     services = []
-                    if 'services' in role.keys():    
-                        services= role['services']
+                    if 'services' in role.keys():
+                        for service_name in role['services']:
+                            service=  orm.Service.find(self.db,service_name)
+                            if service is not None:
+                                services.append(service)
                     users = []
                     if 'users' in role.keys():
-                        users = role['users']
-                    print(role_name, scopes, groups, services, users)    
-                    role = orm.Role(name='testrole', scopes=scopes, groups=groups, services=services, users=users)
-                    self.db.add(role)
-                    roles.append(role)
+                        for user_name in role['users']:
+                            user = orm.User.find(self.db,user_name)
+                            if user is not None:
+                                users.append(user)
+                    print(role_name, scopes, groups, services, users) 
+                    orm_role = orm.Role(name=role_name, scopes=scopes, groups=groups, services=services, users= users)
+                    self.db.add(orm_role)
+                    roles.append(orm_role)
             self.roles = roles
         else:
             self.roles = []

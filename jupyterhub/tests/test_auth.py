@@ -591,3 +591,74 @@ async def test_auth_managed_groups(
         assert not app.db.dirty
         groups = sorted(g.name for g in user.groups)
         assert groups == expected_refresh_groups
+
+def getRoleNames(role_list):
+        return [role['name'] for role in role_list]
+class MockRolesAuthenticator(auth.Authenticator):
+    authenticated_roles = Any()
+    refresh_roles = Any()
+
+    manage_roles = True
+
+    def authenticate(self, handler, data):
+        return {
+            "name": data["username"],
+            "roles": self.authenticated_roles,
+        }
+
+    async def refresh_user(self, user, handler):
+        return {
+            "name": user.name,
+            "roles": self.refresh_roles,
+        }
+
+
+@pytest.mark.parametrize(
+    "authenticated_roles, refresh_roles",
+    [
+        ([{"name":"auth1", "users":"testuser-1"}], None),
+     
+    ],
+)
+async def test_auth_managed_roles(
+    app, user, role, authenticated_roles, refresh_roles
+):
+
+    authenticator = MockRolesAuthenticator(
+        parent=app,
+        authenticated_roles=authenticated_roles,
+        refresh_roles=refresh_roles,
+    )
+
+    user.roles.append(role)
+    app.db.commit()
+    before_roles = [role.name]
+    if authenticated_roles is None:
+        expected_authenticated_roles = before_roles
+    else:
+        expected_authenticated_roles = authenticated_roles
+
+    if refresh_roles is None:
+        expected_refresh_roles = expected_authenticated_roles
+
+    else:
+        expected_refresh_roles = refresh_roles
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",before_roles)
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",authenticated_roles)
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",expected_authenticated_roles)
+    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",refresh_roles)
+    with mock.patch.dict(app.tornado_settings, {"authenticator": authenticator}):
+        cookies = await app.login_user(user.name)
+        assert not app.db.dirty
+        all_roles= app.db.query(orm.Role).all()
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!all!!!!!!!!!!!!",all_roles)
+        default_roles=sorted(g.name for g in all_roles if g.name)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!all!!!!!!!!!!!!",default_roles)
+        roles = sorted(g.name for g in user.roles) 
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!all!!!!!!!!!!!!",roles)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!all!!!!!!!!!!!!",user.roles)
+        expected_authenticated_roles_names = getRoleNames(expected_authenticated_roles)
+        for name in expected_authenticated_roles_names:
+            assert name in roles
+
+    
