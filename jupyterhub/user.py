@@ -355,12 +355,8 @@ class User:
 
         # log role changes
         new_roles_names = set(auth_roles_names).difference(current_roles)
-        removed_roles = current_roles.difference(auth_roles_names)
         if new_roles_names:
             self.log.info(f"Adding new roles {new_roles_names} to the database")
-        if removed_roles:
-            self.log.info(f"Removing new role {removed_roles} from the database")
-
         if auth_roles:
             roles = (
                 self.db.query(orm.Role).all()
@@ -411,9 +407,6 @@ class User:
                     orm_role = orm.Role(name=role_name, scopes=scopes, groups=groups, services=services, users= users)
                     self.db.add(orm_role)
                     roles.append(orm_role)
-            self.roles = roles
-        else:
-            self.roles = []
         self.db.commit()
 
     async def save_auth_state(self, auth_state):
