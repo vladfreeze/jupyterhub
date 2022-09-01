@@ -1883,6 +1883,41 @@ async def test_auth_managed_groups(request, app, group, user):
     )
     assert r.status_code == 400
 
+@mark.group
+async def test_group_add_delete_properties(app):
+    db = app.db
+    group = orm.Group(name='alphaflight')
+    app.db.add(group)
+    app.db.commit()
+
+    r = await api_request(
+        app,
+        'groups/alphaflight/properties',
+        method='put',
+        data=json.dumps({"test_key":"test_value", "test_key2":"test_value2"}),
+    )
+    r.raise_for_status()
+
+    group = orm.Group.find(db, name='alphaflight')
+    assert sorted(u for u in group.properties) == ["test_key","test_key2"]
+    assert sorted(u for u in group.properties.values()) == ["test_value","test_value2"]
+
+
+    r = await api_request(
+        app,
+        'groups/alphaflight/properties',
+        method='put',
+        data=json.dumps({}),
+    )
+    r.raise_for_status()
+
+    group = orm.Group.find(db, name='alphaflight')
+    assert sorted(u for u in group.properties) == []
+    assert sorted(u for u in group.properties.values()) == []
+
+
+
+
 # -----------------
 # Service API tests
 # -----------------
