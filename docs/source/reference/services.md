@@ -38,6 +38,15 @@ A Service may have the following properties:
 - `display: bool (default - True)` - When set to true, display a link to the
   service's URL under the 'Services' dropdown in user's hub home page.
 
+- `oauth_no_confirm: bool (default - False)` - When set to true,
+  skip the OAuth confirmation page when users access this service.
+
+  By default, when users authenticate with a service using JupyterHub,
+  they are prompted to confirm that they want to grant that service
+  access to their credentials.
+  Skipping the confirmation page is useful for admin-managed services that are considered part of the Hub
+  and shouldn't need extra prompts for login.
+
 If a service is also to be managed by the Hub, it has a few extra options:
 
 - `command: (str/Popen list)` - Command for JupyterHub to spawn the service. - Only use this if the service should be a subprocess. - If command is not specified, the Service is assumed to be managed
@@ -116,7 +125,10 @@ JUPYTERHUB_BASE_URL:       Base URL of the Hub (https://mydomain[:port]/)
 JUPYTERHUB_SERVICE_PREFIX: URL path prefix of this service (/services/:service-name/)
 JUPYTERHUB_SERVICE_URL:    Local URL where the service is expected to be listening.
                            Only for proxied web services.
-JUPYTERHUB_OAUTH_SCOPES:   JSON-serialized list of scopes to use for allowing access to the service.
+JUPYTERHUB_OAUTH_SCOPES:   JSON-serialized list of scopes to use for allowing access to the service
+                           (deprecated in 3.0, use JUPYTERHUB_OAUTH_ACCESS_SCOPES).
+JUPYTERHUB_OAUTH_ACCESS_SCOPES: JSON-serialized list of scopes to use for allowing access to the service (new in 3.0).
+JUPYTERHUB_OAUTH_CLIENT_ALLOWED_SCOPES: JSON-serialized list of scopes that can be requested by the oauth client on behalf of users (new in 3.0).
 ```
 
 For the previous 'cull idle' Service example, these environment variables
@@ -376,7 +388,7 @@ The `scopes` field can be used to manage access.
 Note: a user will have access to a service to complete oauth access to the service for the first time.
 Individual permissions may be revoked at any later point without revoking the token,
 in which case the `scopes` field in this model should be checked on each access.
-The default required scopes for access are available from `hub_auth.oauth_scopes` or `$JUPYTERHUB_OAUTH_SCOPES`.
+The default required scopes for access are available from `hub_auth.oauth_scopes` or `$JUPYTERHUB_OAUTH_ACCESS_SCOPES`.
 
 An example of using an Externally-Managed Service and authentication is
 in [nbviewer README][nbviewer example] section on securing the notebook viewer,

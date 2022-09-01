@@ -310,19 +310,19 @@ class User:
             return
 
         # log group changes
-        new_groups = set(group_names).difference(current_groups)
+        added_groups = new_groups.difference(current_groups)
         removed_groups = current_groups.difference(group_names)
-        if new_groups:
-            self.log.info(f"Adding user {self.name} to group(s): {new_groups}")
+        if added_groups:
+            self.log.info(f"Adding user {self.name} to group(s): {added_groups}")
         if removed_groups:
             self.log.info(f"Removing user {self.name} from group(s): {removed_groups}")
 
         if group_names:
             groups = (
-                self.db.query(orm.Group).filter(orm.Group.name.in_(group_names)).all()
+                self.db.query(orm.Group).filter(orm.Group.name.in_(new_groups)).all()
             )
             existing_groups = {g.name for g in groups}
-            for group_name in group_names:
+            for group_name in added_groups:
                 if group_name not in existing_groups:
                     # create groups that don't exist yet
                     self.log.info(
@@ -331,9 +331,9 @@ class User:
                     group = orm.Group(name=group_name)
                     self.db.add(group)
                     groups.append(group)
-            self.groups = groups
+            self.orm_user.groups = groups
         else:
-            self.groups = []
+            self.orm_user.groups = []
         self.db.commit()
 
     async def save_auth_state(self, auth_state):
@@ -702,28 +702,12 @@ class User:
         client_id = spawner.oauth_client_id
         oauth_provider = self.settings.get('oauth_provider')
         if oauth_provider:
-            allowed_roles = spawner.oauth_roles
-            if callable(allowed_roles):
-                allowed_roles = allowed_roles(spawner)
-
-            # allowed_roles config is a list of strings
-            # oauth provider.allowed_roles is a list of orm.Roles
-            if allowed_roles:
-                allowed_role_names = allowed_roles
-                allowed_roles = list(
-                    self.db.query(orm.Role).filter(orm.Role.name.in_(allowed_roles))
-                )
-                if len(allowed_roles) != len(allowed_role_names):
-                    missing_roles = set(allowed_role_names).difference(
-                        {role.name for role in allowed_roles}
-                    )
-                    raise ValueError(f"No such role(s): {', '.join(missing_roles)}")
-
+            allowed_scopes = await spawner._get_oauth_client_allowed_scopes()
             oauth_client = oauth_provider.add_client(
                 client_id,
                 api_token,
                 url_path_join(self.url, url_escape_path(server_name), 'oauth_callback'),
-                allowed_roles=allowed_roles,
+                allowed_scopes=allowed_scopes,
                 description="Server at %s"
                 % (url_path_join(self.base_url, server_name) + '/'),
             )
