@@ -126,7 +126,7 @@ const GroupEdit = (props) => {
                     removeFromGroup(removed_users, group_data.name)
                   );
               }
-
+              console.log("GROUPEDIT DEBUG "+ propkeys, propvalues, propobject )
               if (hasDuplicates(propkeys) == true) {
                 error.textContent = "Duplicate key found!";
                 error.style.color = "red";
