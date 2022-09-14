@@ -126,7 +126,12 @@ const GroupEdit = (props) => {
                     removeFromGroup(removed_users, group_data.name)
                   );
               }
-              console.log("GROUPEDIT DEBUG "+ propkeys, propvalues, propobject )
+              //let propkeys = Object.keys(propobject);
+              //let propvalues = Object.values(propobject);
+              console.log("GROUPEDIT DEBUG "+ propkeys, propvalues, propobject );
+              console.log("GROUPEDIT DEBUG OBJECT "+ propobject );
+              console.log("GROUPEDIT DEBUG KEYS"+ propkeys);
+              console.log("GROUPEDIT DEBUG VALUES"+ propvalues);
               if (hasDuplicates(propkeys) == true) {
                 error.textContent = "Duplicate key found!";
                 error.style.color = "red";
