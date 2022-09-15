@@ -70,6 +70,9 @@ const DynamicTable = (props) => {
               onChange= {(e) => {
                 if (e.target.value != "") {
                   propkeys[i] = e.target.value ;
+                } else{
+                  propvalues.splice(i, 1);
+                  propkeys.splice(i, 1);
                 }
                 setOwnKeys(propkeys);
                 props.setPropKeys(propkeys);
