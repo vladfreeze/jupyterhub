@@ -93,6 +93,8 @@ const GroupEdit = (props) => {
             setProp={setProp}
             setPropKeys={setPropKeys}
             setPropValues={setPropValues}
+            propkeys={Object.keys(current_propobject)}
+            propvalues={Object.values(current_propobject)}
 
             //Add keys
           />
@@ -135,14 +137,14 @@ const GroupEdit = (props) => {
               if (hasDuplicates(propkeys) == true) {
                 error.textContent = "Duplicate key found!";
                 error.style.color = "red";
-              } else {
-                //error.textContent = "";
-                propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
-              }
+              } 
+              console.log(JSON.stringify(propobject));
+              console.log(JSON.stringify(group_data.properties));
               if (
                 propobject != group_data.properties &&
                 hasDuplicates(propkeys) == false
               ) {
+                console.log("PASSED!")
                 promiseQueue.push(updateProp(propobject, group_data.name));
               }
               Promise.all(promiseQueue)

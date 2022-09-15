@@ -6,30 +6,42 @@ import { useSelector, useDispatch } from "react-redux";
 
 const DynamicTable = (props) => {
   
-  var [message, setMessage] = useState(""),
+  var [current_propobject, setPropObject] = useState(props.current_propobject),
+    //[propobject_state, setPropState] = useState(props.setProp),
+    //[propkeys_state, setKeysState] = useState(props.setPropKeys),
+    //[propvalues_state, setValuesState] = useState(props.setPropValues),
+    [propobject, setProp] = useState(""),
+    [message, setMessage] = useState(""),
     [message2, setMessage2] = useState("");
-  var { propkeys, propvalues, current_propobject} = props;
+  var { propkeys, propvalues, propobject } = props;
+  let current_keys = [];
+  let current_values = [];
+  console.log("RESTART");
+  for (var property in current_propobject) {
+      current_keys.push(property);
+      current_values.push(current_propobject[property]);
+      }
+  var [propkeys, setPropKeys] = useState(current_keys),
+    [propvalues, setPropValues] = useState(current_values);
   
-  var propobject = current_propobject;
-  var [ownkeys, setOwnKeys] = useState(Object.keys(current_propobject));
-  var [ownvalues, setOwnValues] = useState(Object.values(current_propobject));
+
   var updateMessageKey = (event) => {
     setMessage(event.target.value);
   }
   var updateMessageValue = (event) => {
     setMessage2(event.target.value);
   }
+
   const handleRefresh = () => {
-    //var propobject = {};
-    //propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
-    //console.log(propobject);
-    //console.log("HandleRefresh"+propkeys);
-    //props.setPropKeys(propkeys);
-    //props.setPropValues(propvalues);
-    //props.setProp(propobject);
+    var propobject = {};
+    propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
+    console.log(propobject);
+    console.log("HandleRefresh"+propkeys);
+    setPropKeys(propkeys);
+    setPropValues(propvalues);
+    setProp(propobject);
     setMessage("");
     setMessage2("");
-
     //setKeysState(propkeys);
     //setValuesState(propvalues);
     //setPropState(propobject);
@@ -46,30 +58,34 @@ const DynamicTable = (props) => {
     } else {
       console.log("Value not valid");
     }
+    var propobject = {};
     propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
   
-    props.setProp(propobject)
-    props.setPropKeys(propkeys);
-    setOwnKeys(propkeys);
-    props.setPropValues(propvalues);
-    setOwnValues(propvalues);
+    setProp(propobject)
+    setPropKeys(propkeys);
+    setPropValues(propvalues);
     setMessage("");
     setMessage2("");
-    console.log(propkeys);
-    console.log(propvalues);
-    console.log(propobject);
+  
+    console.log("STATE KEYS"+ propkeys);
+    console.log("STATE VALUES"+ propvalues);
+    console.log("STATE Object"+ propobject);
+    console.log("STATE Object"+ Object.keys(propobject));
+    console.log("STATE Object"+ Object.values(propobject));
   }
   
   const handleItemDeleted = (i) => {
     propvalues.splice(i, 1);
     propkeys.splice(i, 1);
-    props.setPropKeys(propkeys);
-    props.setPropValues(propvalues);
+    setPropKeys(propkeys);
+    setPropValues(propvalues);
     handleRefresh();
   }
   const renderKeyRows = () => {
 
-    return ownkeys.map(function (o, i) {
+    return propkeys.map(function (o, i) {
+      //console.log("KeyRows" +i)
+      //console.log("KeyRows" +o)
       return (
         <tr key={"item-" + i}>
           <td>
@@ -84,8 +100,9 @@ const DynamicTable = (props) => {
                 }
                 console.log("RENDER "+propkeys);
                 //handleRefresh();
-                setOwnKeys(propkeys);
-                props.setPropKeys(propkeys);
+                
+                handleRefresh();
+                setPropKeys(propkeys);
                 //setKeysState(propkeys);
               }}
             />
@@ -96,7 +113,7 @@ const DynamicTable = (props) => {
   }
   const renderValueRows = (props) => {
 
-    return ownvalues.map(function (o, i) {
+    return propvalues.map(function (o, i) {
       //console.log("ValRows" +i)
       //console.log("ValRows" +o)
       return (
@@ -107,9 +124,13 @@ const DynamicTable = (props) => {
               type="text"
               value={o}
               onChange={(i,o) => {
+     
                 propvalues[i] = o;
-                props.setPropValues(propvalues);
-                setOwnValues(propvalues);
+                //handleRefresh();
+                setPropValues(propvalues);
+                console.log("1"+propvalues.slice(0, -1))
+                console.log(props.propvalues)
+                console.log("3"+propvalues)
                 //setValuesState(propvalues);
 
                 
@@ -122,27 +143,13 @@ const DynamicTable = (props) => {
   }
   const renderDelete = () => {
 
-    return ownvalues.map(function (o, i) {
+    return propvalues.map(function (o, i) {
       return (
         <tr key={"item-" + i}>
           <td>
             <button
               className="btn btn-default"
-              onClick={(i) => {
-                propvalues.splice(i, 1);
-                propkeys.splice(i, 1);
-                console.log("delete");
-                console.log(o,i);
-                console.log(propkeys.splice(i, 1));
-                console.log(propvalues.splice(i, 1));
-                console.log(propkeys);
-                console.log(propvalues);
-                console.log("delete");
-                props.setPropKeys(propkeys);
-                props.setPropValues(propvalues);
-                setOwnValues(propvalues);
-                setOwnKeys(propkeys);
-              }}
+              onClick={handleItemDeleted.bind(i, o)}
             >
               Delete
             </button>
