@@ -36,9 +36,6 @@ const DynamicTable = (props) => {
     setMessage("");
     setMessage2("");
 
-    //setKeysState(propkeys);
-    //setValuesState(propvalues);
-    //setPropState(propobject);
   }
   
   const handleClick = () => {
@@ -73,8 +70,25 @@ const DynamicTable = (props) => {
     props.setPropValues(propvalues);
     handleRefresh();
   }
-  const renderKeyRows = () => {
+  const handleKeyChanged = (i, event) => {
+    console.log(i);
+    console.log(event);
+    console.log(event.target);
+    console.log("value "+ event.target.value);
+    if (event.target.value != "") {
+      propkeys[i] = event.target.value ;
+    }
+    console.log("i "+ i)
+    console.log("RENDER "+propkeys[i]);
 
+    console.log("RENDER "+propkeys);
+    //handleRefresh();
+    setOwnKeys(propkeys);
+    props.setPropKeys(propkeys);
+
+  }
+  const renderKeyRows = () => {
+    var context = this
     return propkeys.map(function (o, i) {
       return (
         <tr key={"item-" + i}>
@@ -82,20 +96,9 @@ const DynamicTable = (props) => {
             <input
               className="form-control"
               type="text"
-              value={o}
-              id={o + i}
-              onChange={(i,o) => {
-                console.log(i);
-                console.log(i.target.value);
-                if (i.target.value != "") {
-                  propkeys[i] = i.target.value ;
-                }
-                console.log("RENDER "+propkeys);
-                //handleRefresh();
-                setOwnKeys(propkeys);
-                props.setPropKeys(propkeys);
-                //setKeysState(propkeys);
-              }}
+              value={propkeys[i]}
+              id={o}
+              onChange= {handleKeyChanged.bind(context,i)}
             />
           </td>
         </tr>
@@ -118,8 +121,7 @@ const DynamicTable = (props) => {
                 propvalues[i] = o;
                 props.setPropValues(propvalues);
                 setOwnValues(propvalues);
-                //setValuesState(propvalues);
-
+    
                 
               }}
             />
@@ -137,15 +139,19 @@ const DynamicTable = (props) => {
             <button
               className="btn btn-default"
               onClick={(i) => {
-                propvalues.splice(i, 1);
-                propkeys.splice(i, 1);
                 console.log("delete");
+                console.log(o);
                 console.log(o,i);
-                console.log(propkeys.splice(i, 1));
-                console.log(propvalues.splice(i, 1));
+                console.log(propkeys.splice(o, 1));
+                console.log(propvalues.splice(o, 1));
                 console.log(propkeys);
                 console.log(propvalues);
                 console.log("delete");
+                propvalues.splice(o, 1);
+                propkeys.splice(o, 1);
+                var propobject = {};
+                propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
+                props.setProp(propobject);
                 props.setPropKeys(propkeys);
                 props.setPropValues(propvalues);
                 setOwnValues(propvalues);
