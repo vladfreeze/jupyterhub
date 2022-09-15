@@ -8,11 +8,12 @@ const DynamicTable = (props) => {
   
   var [message, setMessage] = useState(""),
     [message2, setMessage2] = useState("");
-  var { propkeys, propvalues, current_propobject} = props;
+  var {current_propobject} = props;
   
   var propobject = current_propobject;
-  var [ownkeys, setOwnKeys] = useState(Object.keys(current_propobject));
-  var [ownvalues, setOwnValues] = useState(Object.values(current_propobject));
+
+  var [propkeys, setOwnKeys] = useState(Object.keys(current_propobject));
+  var [propvalues, setOwnValues] = useState(Object.values(current_propobject));
   var updateMessageKey = (event) => {
     setMessage(event.target.value);
   }
@@ -27,6 +28,11 @@ const DynamicTable = (props) => {
     //props.setPropKeys(propkeys);
     //props.setPropValues(propvalues);
     //props.setProp(propobject);
+
+    var propobject = {};
+    propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
+    props.setProp(propobject);
+
     setMessage("");
     setMessage2("");
 
@@ -46,9 +52,9 @@ const DynamicTable = (props) => {
     } else {
       console.log("Value not valid");
     }
+    var propobject = {};
     propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
-  
-    props.setProp(propobject)
+    props.setProp(propobject);
     props.setPropKeys(propkeys);
     setOwnKeys(propkeys);
     props.setPropValues(propvalues);
@@ -69,7 +75,7 @@ const DynamicTable = (props) => {
   }
   const renderKeyRows = () => {
 
-    return ownkeys.map(function (o, i) {
+    return propkeys.map(function (o, i) {
       return (
         <tr key={"item-" + i}>
           <td>
@@ -79,8 +85,10 @@ const DynamicTable = (props) => {
               value={o}
               id={o + i}
               onChange={(i,o) => {
-                if (o != "") {
-                  propkeys[i] = o;
+                console.log(i);
+                console.log(i.target.value);
+                if (i.target.value != "") {
+                  propkeys[i] = i.target.value ;
                 }
                 console.log("RENDER "+propkeys);
                 //handleRefresh();
@@ -94,9 +102,9 @@ const DynamicTable = (props) => {
       );
     });
   }
-  const renderValueRows = (props) => {
+  const renderValueRows = () => {
 
-    return ownvalues.map(function (o, i) {
+    return propvalues.map(function (o, i) {
       //console.log("ValRows" +i)
       //console.log("ValRows" +o)
       return (
@@ -122,7 +130,7 @@ const DynamicTable = (props) => {
   }
   const renderDelete = () => {
 
-    return ownvalues.map(function (o, i) {
+    return propvalues.map(function (o, i) {
       return (
         <tr key={"item-" + i}>
           <td>
