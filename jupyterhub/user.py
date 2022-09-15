@@ -344,16 +344,11 @@ class User:
 
     def sync_roles(self, auth_roles):
         """Synchronize roles with database"""
-        print(">>>>>>>>> >>DEBUG SYNC_ROLES<< <<<<<<<<<<<")
+    
         current_roles = {g.name for g in self.db.query(orm.Role).all()}
-        print(current_roles)
+    
         auth_roles_names = getRoleNames(auth_roles)
-        print(auth_roles_names)
-        #if current_roles == new_roles_names:
-        #    # no change, nothing to do
-        #    return
-
-        # log role changes
+  
         new_roles_names = set(auth_roles_names).difference(current_roles)
         if new_roles_names:
             self.log.info(f"Adding new roles {new_roles_names} to the database")
@@ -403,7 +398,6 @@ class User:
                             user = orm.User.find(self.db,user_name)
                             if user is not None:
                                 users.append(user)
-                    print(role_name, scopes, groups, services, users) 
                     orm_role = orm.Role(name=role_name, scopes=scopes, groups=groups, services=services, users= users)
                     self.db.add(orm_role)
                     roles.append(orm_role)

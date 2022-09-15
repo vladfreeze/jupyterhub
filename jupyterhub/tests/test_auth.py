@@ -594,4 +594,129 @@ async def test_auth_managed_groups(
 
 
 
+class MockGroupsAuthenticator(auth.Authenticator):
+        authenticated_groups = Any()
+        refresh_groups = Any()
+
+        manage_groups = True
+
+        def authenticate(self, handler, data):
+            return {
+                "name": data["username"],
+                "groups": self.authenticated_groups,
+            }
+
+        async def refresh_user(self, user, handler):
+            return {
+                "name": user.name,
+                "groups": self.refresh_groups,
+            }
+
+
+@pytest.mark.parametrize(
+    "authenticated_groups, refresh_groups",
+    [
+        (None, None),
+        (["auth1"], None),
+        (None, ["auth1"]),
+        (["auth1"], ["auth1", "auth2"]),
+        (["auth1", "auth2"], ["auth1"]),
+        (["auth1", "auth2"], ["auth3"]),
+        (["auth1", "auth2"], ["auth3"]),
+    ],
+)
+async def test_auth_managed_groups(
+    app, user, group, authenticated_groups, refresh_groups
+):
+
+    authenticator = MockGroupsAuthenticator(
+        parent=app,
+        authenticated_groups=authenticated_groups,
+        refresh_groups=refresh_groups,
+    )
+
+    user.groups.append(group)
+    app.db.commit()
+    before_groups = [group.name]
+    if authenticated_groups is None:
+        expected_authenticated_groups = before_groups
+    else:
+        expected_authenticated_groups = authenticated_groups
+    if refresh_groups is None:
+        expected_refresh_groups = expected_authenticated_groups
+    else:
+        expected_refresh_groups = refresh_groups
+
+    with mock.patch.dict(app.tornado_settings, {"authenticator": authenticator}):
+        cookies = await app.login_user(user.name)
+        assert not app.db.dirty
+        groups = sorted(g.name for g in user.groups)
+        assert groups == expected_authenticated_groups
+
+        # force refresh_user on next request
+        user._auth_refreshed -= 10 + app.authenticator.auth_refresh_age
+        r = await get_page('home', app, cookies=cookies, allow_redirects=False)
+        assert r.status_code == 200
+        assert not app.db.dirty
+        groups = sorted(g.name for g in user.groups)
+        assert groups == expected_refresh_groups
+
+def getRoleNames(role_list):
+        return [role['name'] for role in role_list]
+class MockRolesAuthenticator(auth.Authenticator):
+    authenticated_roles = Any()
+
+    manage_roles = True
+
+    def authenticate(self, handler, data):
+        return {
+            "name": data["username"],
+            "roles": self.authenticated_roles,
+        }
+
+
+
+@pytest.mark.parametrize(
+    "authenticated_roles",
+    [
+        ([{"name":"testrole-1", "users":"testuser-1"}]),
+        ([{"name":"testrole-2", "users":"testuser-1"}]),
+        ([{"name":"testrole-3", "users":"testuser-1"}]),
+        ([{"name":"testrole-4", "users":"testuser-1"}]),
+        ([{"name":"testrole-5", "users":"testuser-1"}]),
+     
+    ],
+)
+async def test_auth_managed_roles(
+    app, user, role, authenticated_roles
+):
+
+    authenticator = MockRolesAuthenticator(
+        parent=app,
+        authenticated_roles=authenticated_roles,
+    )
     
+    user.roles.append(role)
+    app.db.commit()
+    before_roles = role.name
+    
+    
+    print("authenticated roles ", authenticated_roles)
+    print("before roles ", before_roles)
+    if authenticated_roles is None:
+        expected_authenticated_roles = before_roles
+    else:
+        expected_authenticated_roles = authenticated_roles
+
+
+
+    with mock.patch.dict(app.tornado_settings, {"authenticator": authenticator}):
+        assert not app.db.dirty
+        all_roles= app.db.query(orm.Role).all()
+        default_roles=sorted(g.name for g in all_roles if g.name)
+        user_roles = sorted(g.name for g in user.roles) 
+        expected_authenticated_roles_names = getRoleNames(expected_authenticated_roles)
+        for name in expected_authenticated_roles_names:
+            assert name in user_roles
+            role = orm.Role.find(app.db, name)
+            app.db.delete(role)
