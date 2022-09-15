@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import "./table-select.css";
 import PropTypes from "prop-types";
-import { useSelector, useDispatch } from "react-redux";
 
 
 const DynamicTable = (props) => {
@@ -22,11 +21,6 @@ const DynamicTable = (props) => {
   }
   const handleRefresh = () => {
     
-    //console.log(propobject);
-    //console.log("HandleRefresh"+propkeys);
-    
-    //props.setProp(propobject);
-
     var propobject = {};
     propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
     props.setProp(propobject);
@@ -62,34 +56,8 @@ const DynamicTable = (props) => {
     console.log(propobject);
   }
   
-  const handleItemDeleted = (i) => {
-    propvalues.splice(i, 1);
-    propkeys.splice(i, 1);
-    props.setPropKeys(propkeys);
-    props.setPropValues(propvalues);
-    handleRefresh();
-  }
-  const handleKeyChanged = (i, event) => {
-    console.log(i);
-    console.log(event);
-    console.log(event.target);
-    console.log("value "+ event.target.value);
-    if (event.target.value != "") {
-      propkeys[i] = event.target.value ;
-    }
-    console.log("i "+ i)
-    console.log("RENDER "+propkeys);
-    //handleRefresh();
-    setOwnKeys(propkeys);
-    props.setPropKeys(propkeys);
-  }
+
   const renderKeyRows = () => {
-    useEffect(() => {
-      setOwnKeys(propkeys);
-      console.log("EFFECT "+propkeys);
-      console.log("hyyy");
-     
-    });
     return propkeys.map(function (o, i) {
       return (
         <tr key={"item-" + i}>
@@ -100,16 +68,9 @@ const DynamicTable = (props) => {
               value={propkeys[i]}
               id={o}
               onChange= {(e) => {
-                console.log(i);
-                console.log(e);
-                console.log(e.target);
-                console.log("value "+ e.target.value);
                 if (e.target.value != "") {
                   propkeys[i] = e.target.value ;
                 }
-                console.log("i "+ i)
-                console.log("RENDER "+propkeys);
-                
                 setOwnKeys(propkeys);
                 props.setPropKeys(propkeys);
                 props.setProp(propobject)
