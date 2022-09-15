@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import "./table-select.css";
 import PropTypes from "prop-types";
 import { useSelector, useDispatch } from "react-redux";
@@ -21,18 +21,17 @@ const DynamicTable = (props) => {
     setMessage2(event.target.value);
   }
   const handleRefresh = () => {
-    //var propobject = {};
-    //propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
+    
     //console.log(propobject);
     //console.log("HandleRefresh"+propkeys);
-    //props.setPropKeys(propkeys);
-    //props.setPropValues(propvalues);
+    
     //props.setProp(propobject);
 
     var propobject = {};
     propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
     props.setProp(propobject);
-
+    props.setPropKeys(propkeys);
+    props.setPropValues(propvalues);
     setMessage("");
     setMessage2("");
 
@@ -79,16 +78,18 @@ const DynamicTable = (props) => {
       propkeys[i] = event.target.value ;
     }
     console.log("i "+ i)
-    console.log("RENDER "+propkeys[i]);
-
     console.log("RENDER "+propkeys);
     //handleRefresh();
     setOwnKeys(propkeys);
     props.setPropKeys(propkeys);
-
   }
   const renderKeyRows = () => {
-    var context = this
+    useEffect(() => {
+      setOwnKeys(propkeys);
+      console.log("EFFECT "+propkeys);
+      console.log("hyyy");
+     
+    });
     return propkeys.map(function (o, i) {
       return (
         <tr key={"item-" + i}>
@@ -98,7 +99,22 @@ const DynamicTable = (props) => {
               type="text"
               value={propkeys[i]}
               id={o}
-              onChange= {handleKeyChanged.bind(context,i)}
+              onChange= {(e) => {
+                console.log(i);
+                console.log(e);
+                console.log(e.target);
+                console.log("value "+ e.target.value);
+                if (e.target.value != "") {
+                  propkeys[i] = e.target.value ;
+                }
+                console.log("i "+ i)
+                console.log("RENDER "+propkeys);
+                
+                setOwnKeys(propkeys);
+                props.setPropKeys(propkeys);
+                props.setProp(propobject)
+                handleRefresh();
+                }}
             />
           </td>
         </tr>
@@ -117,12 +133,11 @@ const DynamicTable = (props) => {
               className="form-control"
               type="text"
               value={o}
-              onChange={(i,o) => {
-                propvalues[i] = o;
+              onChange={(e) => {
+                propvalues[i] = e.target.value;
                 props.setPropValues(propvalues);
                 setOwnValues(propvalues);
-    
-                
+                handleRefresh();
               }}
             />
           </td>
@@ -138,15 +153,7 @@ const DynamicTable = (props) => {
           <td>
             <button
               className="btn btn-default"
-              onClick={(i) => {
-                console.log("delete");
-                console.log(o);
-                console.log(o,i);
-                console.log(propkeys.splice(o, 1));
-                console.log(propvalues.splice(o, 1));
-                console.log(propkeys);
-                console.log(propvalues);
-                console.log("delete");
+              onClick={() => {
                 propvalues.splice(o, 1);
                 propkeys.splice(o, 1);
                 var propobject = {};
@@ -156,6 +163,7 @@ const DynamicTable = (props) => {
                 props.setPropValues(propvalues);
                 setOwnValues(propvalues);
                 setOwnKeys(propkeys);
+                handleRefresh();
               }}
             >
               Delete
