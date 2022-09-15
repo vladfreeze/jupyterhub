@@ -93,8 +93,8 @@ const GroupEdit = (props) => {
             setProp={setProp}
             setPropKeys={setPropKeys}
             setPropValues={setPropValues}
-            propkeys={Object.keys(current_propobject)}
-            propvalues={Object.values(current_propobject)}
+            propkeys={Object.keys(group_data.properties)}
+            propvalues={Object.values(group_data.properties)}
 
             //Add keys
           />
