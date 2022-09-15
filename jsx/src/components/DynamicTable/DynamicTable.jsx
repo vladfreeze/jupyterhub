@@ -154,8 +154,8 @@ const DynamicTable = (props) => {
             <button
               className="btn btn-default"
               onClick={() => {
-                propvalues.splice(o, 1);
-                propkeys.splice(o, 1);
+                propvalues.splice(i, 1);
+                propkeys.splice(i, 1);
                 var propobject = {};
                 propkeys.forEach((key, i) => (propobject[key] = propvalues[i]));
                 props.setProp(propobject);
