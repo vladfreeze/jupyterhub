@@ -1,17 +1,17 @@
 # This is a GitHub workflow defining a set of jobs with a set of steps.
 # ref: https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions
 #
-name: Test jsx (admin-react.js)
+name: Test jsx2 (admin-react.js)
 
 on:
   pull_request:
     paths:
       - "jsx/**"
-      - ".github/workflows/test-jsx.yml"
+      - ".github/workflows/test-jsx2.yml"
   push:
     paths:
       - "jsx/**"
-      - ".github/workflows/test-jsx.yml"
+      - ".github/workflows/test-jsx2.yml"
     branches-ignore:
       - "dependabot/**"
       - "pre-commit-ci-update-config"
@@ -27,7 +27,7 @@ jobs:
   # to share/jupyterhub/static/js/admin-react.js. The ./jsx folder includes
   # tests also has tests that this job is meant to run with `yarn test`
   # according to the documentation in jsx/README.md.
-  test-jsx-admin-react:
+  test-jsx2-admin-react:
     runs-on: ubuntu-20.04
     timeout-minutes: 5
 
