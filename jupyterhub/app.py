@@ -2090,12 +2090,12 @@ class JupyterHub(Application):
             self._rbac_upgrade = True
         else:
             self._rbac_upgrade = False
-        # Removed for persistent roles:
-        #for role in self.db.query(orm.Role).filter(
-        #    orm.Role.name.notin_(init_role_names)
-        #):
-            #self.log.warning(f"Deleting role {role.name}")
-            #self.db.delete(role)
+        
+        for role in self.db.query(orm.Role).filter(
+            orm.Role.name.notin_(init_role_names)
+        ):
+            self.log.warning(f"Deleting role {role.name}")
+            self.db.delete(role)
         self.db.commit()
         for role in init_roles:
             roles.create_role(self.db, role)
