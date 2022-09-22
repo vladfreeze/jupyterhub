@@ -594,7 +594,7 @@ class JupyterHub(Application):
 
         This sets the list of IP addresses that are trusted and skipped when processing
         the `X-Forwarded-For` header. For example, if an external proxy is used for TLS
-        termination, its IP address should be added to this list to ensure the correct
+        termination, its IP address should be added to this list to ensure the correct.
         client IP addresses are recorded in the logs instead of the proxy server's IP
         address.
         """,
