@@ -59,7 +59,7 @@ JupyterHub also provides a
 [REST API][]
 for administration of the Hub and its users.
 
-[rest api]: https://juptyerhub.readthedocs.io/en/latest/reference/rest-api.html
+[rest api]: https://jupyterhub.readthedocs.io/en/latest/reference/rest-api.html
 
 ## Installation
 
@@ -117,8 +117,7 @@ To start the Hub server, run the command:
 
     jupyterhub
 
-Visit `https://localhost:8000` in your browser, and sign in with your unix
-PAM credentials.
+Visit `http://localhost:8000` in your browser, and sign in with your system username and password.
 
 _Note_: To allow multiple users to sign in to the server, you will need to
 run the `jupyterhub` command as a _privileged user_, such as root.

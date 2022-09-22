@@ -275,7 +275,7 @@ where `ssl_cert` is example-chained.crt and ssl_key to your private key.
 
 Then restart JupyterHub.
 
-See also [JupyterHub SSL encryption](./getting-started/security-basics.html#ssl-encryption).
+See also {ref}`ssl-encryption`.
 
 ### Install JupyterHub without a network connection
 
@@ -371,7 +371,7 @@ a JupyterHub deployment. The commands are:
 - System and deployment information
 
 ```bash
-jupyter troubleshooting
+jupyter troubleshoot
 ```
 
 - Kernel information

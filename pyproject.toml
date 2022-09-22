@@ -1,9 +1,15 @@
+[tool.isort]
+profile = "black"
+
 [tool.black]
 skip-string-normalization = true
+# target-version should be all supported versions, see
+# https://github.com/psf/black/issues/751#issuecomment-473066811
 target_version = [
-    "py36",
     "py37",
     "py38",
+    "py39",
+    "py310",
 ]
 
 [tool.tbump]
@@ -11,7 +17,7 @@ target_version = [
 github_url = "https://github.com/jupyterhub/jupyterhub"
 
 [tool.tbump.version]
-current = "2.0.0rc3"
+current = "3.1.0.dev"
 
 # Example of a semver regexp.
 # Make sure this matches current_version before

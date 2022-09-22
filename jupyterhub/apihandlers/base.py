@@ -4,18 +4,15 @@
 import json
 from functools import lru_cache
 from http.client import responses
-from urllib.parse import parse_qs
-from urllib.parse import urlencode
-from urllib.parse import urlparse
-from urllib.parse import urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy.exc import SQLAlchemyError
 from tornado import web
 
 from .. import orm
 from ..handlers import BaseHandler
-from ..utils import isoformat
-from ..utils import url_path_join
+from ..scopes import get_scopes_for
+from ..utils import get_browser_protocol, isoformat, url_escape_path, url_path_join
 
 PAGINATION_MEDIA_TYPE = "application/jupyterhub-pagination+json"
 
@@ -30,6 +27,9 @@ class APIHandler(BaseHandler):
     - strict content-security-policy
     - methods for REST API models
     """
+
+    # accept token-based authentication for API requests
+    _accept_token_auth = True
 
     @property
     def content_security_policy(self):
@@ -55,7 +55,10 @@ class APIHandler(BaseHandler):
 
         - allow unspecified host/referer (e.g. scripts)
         """
-        host = self.request.headers.get("Host")
+        host_header = self.app.forwarded_host_header or "Host"
+        host = self.request.headers.get(host_header)
+        if host and "," in host:
+            host = host.split(",", 1)[0].strip()
         referer = self.request.headers.get("Referer")
 
         # If no header is provided, assume it comes from a script/curl.
@@ -67,13 +70,25 @@ class APIHandler(BaseHandler):
             self.log.warning("Blocking API request with no referer")
             return False
 
-        host_path = url_path_join(host, self.hub.base_url)
-        referer_path = referer.split('://', 1)[-1]
-        if not (referer_path + '/').startswith(host_path):
+        proto = get_browser_protocol(self.request)
+
+        full_host = f"{proto}://{host}{self.hub.base_url}"
+        host_url = urlparse(full_host)
+        referer_url = urlparse(referer)
+        # resolve default ports for http[s]
+        referer_port = referer_url.port or (
+            443 if referer_url.scheme == 'https' else 80
+        )
+        host_port = host_url.port or (443 if host_url.scheme == 'https' else 80)
+        if (
+            referer_url.scheme != host_url.scheme
+            or referer_url.hostname != host_url.hostname
+            or referer_port != host_port
+            or not (referer_url.path + "/").startswith(host_url.path)
+        ):
             self.log.warning(
-                "Blocking Cross Origin API request.  Referer: %s, Host: %s",
-                referer,
-                host_path,
+                f"Blocking Cross Origin API request.  Referer: {referer},"
+                f" {host_header}: {host}, Host URL: {full_host}",
             )
             return False
         return True
@@ -172,22 +187,44 @@ class APIHandler(BaseHandler):
             json.dumps({'status': status_code, 'message': message or status_message})
         )
 
-    def server_model(self, spawner):
+    def server_model(self, spawner, *, user=None):
         """Get the JSON model for a Spawner
-        Assume server permission already granted"""
+        Assume server permission already granted
+        """
+        if isinstance(spawner, orm.Spawner):
+            # if an orm.Spawner is passed,
+            # create a model for a stopped Spawner
+            # not all info is available without the higher-level Spawner wrapper
+            orm_spawner = spawner
+            pending = None
+            ready = False
+            stopped = True
+            user = user
+            if user is None:
+                raise RuntimeError("Must specify User with orm.Spawner")
+            state = orm_spawner.state
+        else:
+            orm_spawner = spawner.orm_spawner
+            pending = spawner.pending
+            ready = spawner.ready
+            user = spawner.user
+            stopped = not spawner.active
+            state = spawner.get_state()
+
         model = {
-            'name': spawner.name,
-            'last_activity': isoformat(spawner.orm_spawner.last_activity),
-            'started': isoformat(spawner.orm_spawner.started),
-            'pending': spawner.pending,
-            'ready': spawner.ready,
-            'url': url_path_join(spawner.user.url, spawner.name, '/'),
+            'name': orm_spawner.name,
+            'last_activity': isoformat(orm_spawner.last_activity),
+            'started': isoformat(orm_spawner.started),
+            'pending': pending,
+            'ready': ready,
+            'stopped': stopped,
+            'url': url_path_join(user.url, url_escape_path(spawner.name), '/'),
             'user_options': spawner.user_options,
-            'progress_url': spawner._progress_url,
+            'progress_url': user.progress_url(spawner.name),
         }
         scope_filter = self.get_scope_filter('admin:server_state')
         if scope_filter(spawner, kind='server'):
-            model['state'] = spawner.get_state()
+            model['state'] = state
         return model
 
     def token_model(self, token):
@@ -205,11 +242,14 @@ class APIHandler(BaseHandler):
             owner_key: owner,
             'id': token.api_id,
             'kind': 'api_token',
-            'roles': [r.name for r in token.roles],
+            # deprecated field, but leave it present.
+            'roles': [],
+            'scopes': list(get_scopes_for(token)),
             'created': isoformat(token.created),
             'last_activity': isoformat(token.last_activity),
             'expires_at': isoformat(token.expires_at),
             'note': token.note,
+            'session_id': token.session_id,
             'oauth_client': token.oauth_client.description
             or token.oauth_client.identifier,
         }
@@ -230,10 +270,22 @@ class APIHandler(BaseHandler):
             keys.update(allowed_keys)
         return model
 
+    _include_stopped_servers = None
+
+    @property
+    def include_stopped_servers(self):
+        """Whether stopped servers should be included in user models"""
+        if self._include_stopped_servers is None:
+            self._include_stopped_servers = self.get_argument(
+                "include_stopped_servers", "0"
+            ).lower() not in {"0", "false"}
+        return self._include_stopped_servers
+
     def user_model(self, user):
         """Get the JSON model for a User object"""
         if isinstance(user, orm.User):
             user = self.users[user.id]
+        include_stopped_servers = self.include_stopped_servers
         model = {
             'kind': 'user',
             'name': user.name,
@@ -273,18 +325,29 @@ class APIHandler(BaseHandler):
             if '' in user.spawners and 'pending' in allowed_keys:
                 model['pending'] = user.spawners[''].pending
 
-            servers = model['servers'] = {}
+            servers = {}
             scope_filter = self.get_scope_filter('read:servers')
             for name, spawner in user.spawners.items():
                 # include 'active' servers, not just ready
                 # (this includes pending events)
-                if spawner.active and scope_filter(spawner, kind='server'):
+                if (spawner.active or include_stopped_servers) and scope_filter(
+                    spawner, kind='server'
+                ):
                     servers[name] = self.server_model(spawner)
-            if not servers and 'servers' not in allowed_keys:
+
+            if include_stopped_servers:
+                # add any stopped servers in the db
+                seen = set(servers.keys())
+                for name, orm_spawner in user.orm_spawners.items():
+                    if name not in seen and scope_filter(orm_spawner, kind='server'):
+                        servers[name] = self.server_model(orm_spawner, user=user)
+
+            if "servers" in allowed_keys or servers:
                 # omit servers if no access
                 # leave present and empty
                 # if request has access to read servers in general
-                model.pop('servers')
+                model["servers"] = servers
+
         return model
 
     def group_model(self, group):

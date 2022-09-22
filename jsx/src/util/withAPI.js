@@ -2,17 +2,22 @@ import { withProps } from "recompose";
 import { jhapiRequest } from "./jhapiUtil";
 
 const withAPI = withProps(() => ({
-  updateUsers: (offset, limit) =>
-    jhapiRequest(`/users?offset=${offset}&limit=${limit}`, "GET").then((data) =>
-      data.json()
-    ),
+  updateUsers: (offset, limit, name_filter) =>
+    jhapiRequest(
+      `/users?include_stopped_servers&offset=${offset}&limit=${limit}&name_filter=${
+        name_filter || ""
+      }`,
+      "GET"
+    ).then((data) => data.json()),
   updateGroups: (offset, limit) =>
     jhapiRequest(`/groups?offset=${offset}&limit=${limit}`, "GET").then(
       (data) => data.json()
     ),
   shutdownHub: () => jhapiRequest("/shutdown", "POST"),
-  startServer: (name) => jhapiRequest("/users/" + name + "/server", "POST"),
-  stopServer: (name) => jhapiRequest("/users/" + name + "/server", "DELETE"),
+  startServer: (name, serverName = "") =>
+    jhapiRequest("/users/" + name + "/servers/" + (serverName || ""), "POST"),
+  stopServer: (name, serverName = "") =>
+    jhapiRequest("/users/" + name + "/servers/" + (serverName || ""), "DELETE"),
   startAll: (names) =>
     names.map((e) => jhapiRequest("/users/" + e + "/server", "POST")),
   stopAll: (names) =>
@@ -38,13 +43,14 @@ const withAPI = withProps(() => ({
     jhapiRequest("/users/" + username, "GET")
       .then((data) => data.status)
       .then((data) => (data > 200 ? false : true)),
-  failRegexEvent: () =>
-    alert(
-      "Cannot change username - either contains special characters or is too short."
-    ),
-  noChangeEvent: () => {
-    returns;
+  // Temporarily Unused
+  failRegexEvent: () => {
+    return null;
   },
+  noChangeEvent: () => {
+    return null;
+  },
+  //
   refreshGroupsData: () =>
     jhapiRequest("/groups", "GET").then((data) => data.json()),
   refreshUserData: () =>

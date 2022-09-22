@@ -1,24 +1,16 @@
 """Authorization handlers"""
 # Copyright (c) Jupyter Development Team.
 # Distributed under the terms of the Modified BSD License.
-import itertools
 import json
 from datetime import datetime
-from urllib.parse import parse_qsl
-from urllib.parse import quote
-from urllib.parse import urlencode
-from urllib.parse import urlparse
-from urllib.parse import urlunparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 from oauthlib import oauth2
 from tornado import web
 
-from .. import orm
-from .. import roles
-from .. import scopes
-from ..utils import token_authenticated
-from .base import APIHandler
-from .base import BaseHandler
+from .. import orm, roles, scopes
+from ..utils import get_browser_protocol, token_authenticated
+from .base import APIHandler, BaseHandler
 
 
 class TokenAPIHandler(APIHandler):
@@ -37,7 +29,7 @@ class TokenAPIHandler(APIHandler):
         if owner:
             # having a token means we should be able to read the owner's model
             # (this is the only thing this handler is for)
-            self.expanded_scopes.update(scopes.identify_scopes(owner))
+            self.expanded_scopes |= scopes.identify_scopes(owner)
             self.parsed_scopes = scopes.parse_scopes(self.expanded_scopes)
 
         # record activity whenever we see a token
@@ -115,7 +107,10 @@ class OAuthHandler:
         # make absolute local redirects full URLs
         # to satisfy oauthlib's absolute URI requirement
         redirect_uri = (
-            self.request.protocol + "://" + self.request.headers['Host'] + redirect_uri
+            get_browser_protocol(self.request)
+            + "://"
+            + self.request.host
+            + redirect_uri
         )
         parsed_url = urlparse(uri)
         query_list = parse_qsl(parsed_url.query, keep_blank_values=True)
@@ -176,7 +171,7 @@ class OAuthAuthorizeHandler(OAuthHandler, BaseHandler):
             raise
         self.send_oauth_response(headers, body, status)
 
-    def needs_oauth_confirm(self, user, oauth_client, roles):
+    def needs_oauth_confirm(self, user, oauth_client, requested_scopes):
         """Return whether the given oauth client needs to prompt for access for the given user
 
         Checks list for oauth clients that don't need confirmation
@@ -207,20 +202,20 @@ class OAuthAuthorizeHandler(OAuthHandler, BaseHandler):
             user_id=user.id,
             client_id=oauth_client.identifier,
         )
-        authorized_roles = set()
+        authorized_scopes = set()
         for token in existing_tokens:
-            authorized_roles.update({role.name for role in token.roles})
+            authorized_scopes.update(token.scopes)
 
-        if authorized_roles:
-            if set(roles).issubset(authorized_roles):
+        if authorized_scopes:
+            if set(requested_scopes).issubset(authorized_scopes):
                 self.log.debug(
-                    f"User {user.name} has already authorized {oauth_client.identifier} for roles {roles}"
+                    f"User {user.name} has already authorized {oauth_client.identifier} for scopes {requested_scopes}"
                 )
                 return False
             else:
                 self.log.debug(
                     f"User {user.name} has authorized {oauth_client.identifier}"
-                    f" for roles {authorized_roles}, confirming additonal roles {roles}"
+                    f" for scopes {authorized_scopes}, confirming additional scopes {requested_scopes}"
                 )
         # default: require confirmation
         return True
@@ -247,7 +242,7 @@ class OAuthAuthorizeHandler(OAuthHandler, BaseHandler):
         uri, http_method, body, headers = self.extract_oauth_params()
         try:
             (
-                role_names,
+                requested_scopes,
                 credentials,
             ) = self.oauth_provider.validate_authorization_request(
                 uri, http_method, body, headers
@@ -279,26 +274,51 @@ class OAuthAuthorizeHandler(OAuthHandler, BaseHandler):
                 raise web.HTTPError(
                     403, f"You do not have permission to access {client.description}"
                 )
-            if not self.needs_oauth_confirm(self.current_user, client, role_names):
+
+            # subset 'raw scopes' to those held by authenticating user
+            requested_scopes = set(requested_scopes)
+            user = self.current_user
+            # raw, _not_ expanded scopes
+            user_scopes = roles.roles_to_scopes(roles.get_roles_for(user.orm_user))
+            # these are some scopes the user may not have
+            # in 'raw' form, but definitely have at this point
+            # make sure they are here, because we are computing the
+            # 'raw' scope intersection,
+            # rather than the expanded_scope intersection
+
+            required_scopes = {*scopes.identify_scopes(), *scopes.access_scopes(client)}
+            user_scopes |= {"inherit", *required_scopes}
+
+            allowed_scopes = requested_scopes.intersection(user_scopes)
+            excluded_scopes = requested_scopes.difference(user_scopes)
+            # TODO: compute lower-level intersection of remaining _expanded_ scopes
+            # (e.g. user has admin:users, requesting read:users!group=x)
+
+            if excluded_scopes:
+                self.log.warning(
+                    f"Service {client.description} requested scopes {','.join(requested_scopes)}"
+                    f" for user {self.current_user.name},"
+                    f" granting only {','.join(allowed_scopes) or '[]'}."
+                )
+
+            if not self.needs_oauth_confirm(self.current_user, client, allowed_scopes):
                 self.log.debug(
                     "Skipping oauth confirmation for %s accessing %s",
                     self.current_user,
                     client.description,
                 )
                 # this is the pre-1.0 behavior for all oauth
-                self._complete_login(uri, headers, role_names, credentials)
+                self._complete_login(uri, headers, allowed_scopes, credentials)
                 return
 
-            # resolve roles to scopes for authorization page
-            raw_scopes = set()
-            if role_names:
-                role_objects = (
-                    self.db.query(orm.Role).filter(orm.Role.name.in_(role_names)).all()
-                )
-                raw_scopes = set(
-                    itertools.chain(*(role.scopes for role in role_objects))
-                )
-            if not raw_scopes:
+            # discard 'required' scopes from description
+            # no need to describe the ability to access itself
+            scopes_to_describe = allowed_scopes.difference(required_scopes)
+
+            if not scopes_to_describe:
+                # TODO: describe all scopes?
+                # Not right now, because the no-scope default 'identify' text
+                # is clearer than what we produce for those scopes individually
                 scope_descriptions = [
                     {
                         "scope": None,
@@ -308,8 +328,8 @@ class OAuthAuthorizeHandler(OAuthHandler, BaseHandler):
                         "filter": "",
                     }
                 ]
-            elif 'inherit' in raw_scopes:
-                raw_scopes = ['inherit']
+            elif 'inherit' in scopes_to_describe:
+                allowed_scopes = scopes_to_describe = ['inherit']
                 scope_descriptions = [
                     {
                         "scope": "inherit",
@@ -321,7 +341,7 @@ class OAuthAuthorizeHandler(OAuthHandler, BaseHandler):
                 ]
             else:
                 scope_descriptions = scopes.describe_raw_scopes(
-                    raw_scopes,
+                    scopes_to_describe,
                     username=self.current_user.name,
                 )
             # Render oauth 'Authorize application...' page
@@ -330,7 +350,7 @@ class OAuthAuthorizeHandler(OAuthHandler, BaseHandler):
                 await self.render_template(
                     "oauth.html",
                     auth_state=auth_state,
-                    role_names=role_names,
+                    allowed_scopes=allowed_scopes,
                     scope_descriptions=scope_descriptions,
                     oauth_client=client,
                 )
@@ -377,6 +397,10 @@ class OAuthAuthorizeHandler(OAuthHandler, BaseHandler):
         # The scopes the user actually authorized, i.e. checkboxes
         # that were selected.
         scopes = self.get_arguments('scopes')
+        if scopes == []:
+            # avoid triggering default scopes (provider selects default scopes when scopes is falsy)
+            # when an explicit empty list is authorized
+            scopes = ["identify"]
         # credentials we need in the validator
         credentials = self.add_credentials()
 

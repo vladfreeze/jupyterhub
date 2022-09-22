@@ -11,106 +11,86 @@ import re
 import secrets
 import signal
 import socket
+import ssl
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from datetime import timedelta
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from getpass import getuser
-from glob import glob
-from itertools import chain
 from operator import itemgetter
 from textwrap import dedent
-from urllib.parse import unquote
-from urllib.parse import urlparse
-from urllib.parse import urlunparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 if sys.version_info[:2] < (3, 3):
     raise ValueError("Python < 3.3 not supported: %s" % sys.version)
 
-# For compatibility with python versions 3.6 or earlier.
-# asyncio.Task.all_tasks() is fully moved to asyncio.all_tasks() starting with 3.9. Also applies to current_task.
-try:
-    asyncio_all_tasks = asyncio.all_tasks
-    asyncio_current_task = asyncio.current_task
-except AttributeError as e:
-    asyncio_all_tasks = asyncio.Task.all_tasks
-    asyncio_current_task = asyncio.Task.current_task
-
-from dateutil.parser import parse as parse_date
-from jinja2 import Environment, FileSystemLoader, PrefixLoader, ChoiceLoader
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
-
-from tornado.httpclient import AsyncHTTPClient
 import tornado.httpserver
-from tornado.ioloop import IOLoop, PeriodicCallback
-from tornado.log import app_log, access_log, gen_log
 import tornado.options
+from dateutil.parser import parse as parse_date
+from jinja2 import ChoiceLoader, Environment, FileSystemLoader, PrefixLoader
+from jupyter_telemetry.eventlog import EventLog
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from tornado import gen, web
-
+from tornado.httpclient import AsyncHTTPClient
+from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.log import access_log, app_log, gen_log
 from traitlets import (
-    Unicode,
-    Integer,
-    Dict,
-    TraitError,
-    List,
-    Bool,
     Any,
-    Tuple,
-    Type,
-    Set,
-    Instance,
+    Bool,
     Bytes,
+    Dict,
     Float,
+    Instance,
+    Integer,
+    List,
+    Set,
+    Tuple,
+    Unicode,
     Union,
-    observe,
     default,
+    observe,
     validate,
 )
 from traitlets.config import Application, Configurable, catch_config_error
 
-from jupyter_telemetry.eventlog import EventLog
-
 here = os.path.dirname(__file__)
 
 import jupyterhub
-from . import handlers, apihandlers
-from .handlers.static import CacheControlStaticFilesHandler, LogoHandler
-from .services.service import Service
 
-from . import crypto
-from . import dbutil, orm
-from . import roles
-from .user import UserDict
-from .oauth.provider import make_provider
+from . import apihandlers, crypto, dbutil, handlers, orm, roles, scopes
 from ._data import DATA_FILES_PATH
-from .log import CoroutineLogFormatter, log_request
-from .proxy import Proxy, ConfigurableHTTPProxy
-from .traitlets import URLPrefix, Command, EntryPointType, Callable
-from .utils import (
-    AnyTimeoutError,
-    catch_db_error,
-    maybe_future,
-    url_path_join,
-    print_stacks,
-    print_ps_info,
-    make_ssl_context,
-)
-from .metrics import HUB_STARTUP_DURATION_SECONDS
-from .metrics import INIT_SPAWNERS_DURATION_SECONDS
-from .metrics import RUNNING_SERVERS
-from .metrics import TOTAL_USERS
 
 # classes for config
 from .auth import Authenticator, PAMAuthenticator
 from .crypto import CryptKeeper
-from .spawner import Spawner, LocalProcessSpawner
-from .objects import Hub, Server
 
 # For faking stats
 from .emptyclass import EmptyClass
+from .handlers.static import CacheControlStaticFilesHandler, LogoHandler
+from .log import CoroutineLogFormatter, log_request
+from .metrics import (
+    HUB_STARTUP_DURATION_SECONDS,
+    INIT_SPAWNERS_DURATION_SECONDS,
+    RUNNING_SERVERS,
+    TOTAL_USERS,
+)
+from .oauth.provider import make_provider
+from .objects import Hub, Server
+from .proxy import ConfigurableHTTPProxy, Proxy
+from .services.service import Service
+from .spawner import LocalProcessSpawner, Spawner
+from .traitlets import Callable, Command, EntryPointType, URLPrefix
+from .user import UserDict
+from .utils import (
+    AnyTimeoutError,
+    catch_db_error,
+    make_ssl_context,
+    maybe_future,
+    print_ps_info,
+    print_stacks,
+    url_path_join,
+)
 
 common_aliases = {
     'log-level': 'Application.log_level',
@@ -350,6 +330,29 @@ class JupyterHub(Application):
 
         Default roles are defined in roles.py.
 
+        """,
+    ).tag(config=True)
+
+    custom_scopes = Dict(
+        key_trait=Unicode(),
+        value_trait=Dict(
+            key_trait=Unicode(),
+        ),
+        help="""Custom scopes to define.
+
+        For use when defining custom roles,
+        to grant users granular permissions
+
+        All custom scopes must have a description,
+        and must start with the prefix `custom:`.
+
+        For example::
+
+            custom_scopes = {
+                "custom:jupyter_server:read": {
+                    "description": "read-only access to a single-user server",
+                },
+            }
         """,
     ).tag(config=True)
 
@@ -701,11 +704,14 @@ class JupyterHub(Application):
         """,
     ).tag(config=True)
 
-    def _subdomain_host_changed(self, name, old, new):
+    @validate("subdomain_host")
+    def _validate_subdomain_host(self, proposal):
+        new = proposal.value
         if new and '://' not in new:
             # host should include '://'
             # if not specified, assume https: You have to be really explicit about HTTP!
-            self.subdomain_host = 'https://' + new
+            new = 'https://' + new
+        return new
 
     domain = Unicode(help="domain name, e.g. 'example.com' (excludes protocol, port)")
 
@@ -790,6 +796,16 @@ class JupyterHub(Application):
         self.config.ConfigurableHTTPProxy.api_url = 'http://{}:{}'.format(
             self.proxy_api_ip or '127.0.0.1', self.proxy_api_port or self.port + 1
         )
+
+    forwarded_host_header = Unicode(
+        '',
+        help="""Alternate header to use as the Host (e.g., X-Forwarded-Host)
+        when determining whether a request is cross-origin
+
+        This may be useful when JupyterHub is running behind a proxy that rewrites
+        the Host header.
+        """,
+    ).tag(config=True)
 
     hub_port = Integer(
         8081,
@@ -1109,7 +1125,7 @@ class JupyterHub(Application):
 
     @default('authenticator')
     def _authenticator_default(self):
-        return self.authenticator_class(parent=self, db=self.db)
+        return self.authenticator_class(parent=self, _deprecated_db_session=self.db)
 
     implicit_spawn_seconds = Float(
         0,
@@ -1297,11 +1313,14 @@ class JupyterHub(Application):
 
     admin_access = Bool(
         False,
-        help="""Grant admin users permission to access single-user servers.
+        help="""DEPRECATED since version 2.0.0.
 
-        Users should be properly informed if this is enabled.
+        The default admin role has full permissions, use custom RBAC scopes instead to
+        create restricted administrator roles.
+        https://jupyterhub.readthedocs.io/en/stable/rbac/index.html
         """,
     ).tag(config=True)
+
     admin_users = Set(
         help="""DEPRECATED since version 0.7.2, use Authenticator.admin_users instead."""
     ).tag(config=True)
@@ -1679,7 +1698,9 @@ class JupyterHub(Application):
             for authority, files in self.internal_ssl_authorities.items():
                 if files:
                     self.log.info("Adding CA for %s", authority)
-                    certipy.store.add_record(authority, is_ca=True, files=files)
+                    certipy.store.add_record(
+                        authority, is_ca=True, files=files, overwrite=True
+                    )
 
             self.internal_trust_bundles = certipy.trust_from_graph(
                 self.internal_ssl_components_trust
@@ -1893,6 +1914,7 @@ class JupyterHub(Application):
             user = orm.User.find(db, name)
             if user is None:
                 user = orm.User(name=name, admin=True)
+                roles.assign_default_roles(self.db, entity=user)
                 new_users.append(user)
                 db.add(user)
             else:
@@ -1983,12 +2005,16 @@ class JupyterHub(Application):
             self.log.info(f"Creating user {username}")
             user = orm.User(name=username)
             self.db.add(user)
+            roles.assign_default_roles(self.db, entity=user)
             self.db.commit()
         return user
 
     async def init_groups(self):
         """Load predefined groups into the database"""
         db = self.db
+
+        if self.authenticator.manage_groups and self.load_groups:
+            raise ValueError("Group management has been offloaded to the authenticator")
         for name, usernames in self.load_groups.items():
             group = orm.Group.find(db, name)
             if group is None:
@@ -2003,15 +2029,29 @@ class JupyterHub(Application):
         db.commit()
 
     async def init_role_creation(self):
-        """Load default and predefined roles into the database"""
-        self.log.debug('Loading default roles to database')
+        """Load default and user-defined roles and scopes into the database"""
+        if self.custom_scopes:
+            self.log.info(f"Defining {len(self.custom_scopes)} custom scopes.")
+            scopes.define_custom_scopes(self.custom_scopes)
+        self.log.debug('Loading roles into database')
         default_roles = roles.get_default_roles()
         config_role_names = [r['name'] for r in self.load_roles]
 
-        init_roles = default_roles
+        default_roles_dict = {role["name"]: role for role in default_roles}
+        init_roles = []
         roles_with_new_permissions = []
         for role_spec in self.load_roles:
             role_name = role_spec['name']
+            if role_name in default_roles_dict:
+                self.log.debug(f"Overriding default role {role_name}")
+                # merge custom role spec with default role spec when overriding
+                # so the new role can be partially defined
+                default_role_spec = default_roles_dict.pop(role_name)
+                merged_role_spec = {}
+                merged_role_spec.update(default_role_spec)
+                merged_role_spec.update(role_spec)
+                role_spec = merged_role_spec
+
             # Check for duplicates
             if config_role_names.count(role_name) > 1:
                 raise ValueError(
@@ -2021,38 +2061,29 @@ class JupyterHub(Application):
             # Check if some roles have obtained new permissions (to avoid 'scope creep')
             old_role = orm.Role.find(self.db, name=role_name)
             if old_role:
-                if not set(role_spec['scopes']).issubset(old_role.scopes):
-                    app_log.warning(
+                if not set(role_spec.get('scopes', [])).issubset(old_role.scopes):
+                    self.log.warning(
                         "Role %s has obtained extra permissions" % role_name
                     )
                     roles_with_new_permissions.append(role_name)
-        if roles_with_new_permissions:
-            unauthorized_oauth_tokens = (
-                self.db.query(orm.APIToken)
-                .filter(
-                    orm.APIToken.roles.any(
-                        orm.Role.name.in_(roles_with_new_permissions)
-                    )
-                )
-                .filter(orm.APIToken.client_id != 'jupyterhub')
-            )
-            for token in unauthorized_oauth_tokens:
-                app_log.warning(
-                    "Deleting OAuth token %s; one of its roles obtained new permissions that were not authorized by user"
-                    % token
-                )
-                self.db.delete(token)
-            self.db.commit()
+
+        # make sure we load any default roles not overridden
+        init_roles = list(default_roles_dict.values()) + init_roles
 
         init_role_names = [r['name'] for r in init_roles]
-        if not orm.Role.find(self.db, name='admin'):
+        if (
+            self.db.query(orm.Role).first() is None
+            and self.db.query(orm.User).first() is not None
+        ):
+            # apply rbac-upgrade default role assignment if there are users in the db,
+            # but not any roles
             self._rbac_upgrade = True
         else:
             self._rbac_upgrade = False
         for role in self.db.query(orm.Role).filter(
             orm.Role.name.notin_(init_role_names)
         ):
-            app_log.info(f"Deleting role {role.name}")
+            self.log.warning(f"Deleting role {role.name}")
             self.db.delete(role)
         self.db.commit()
         for role in init_roles:
@@ -2068,71 +2099,89 @@ class JupyterHub(Application):
         if config_admin_users:
             for role_spec in self.load_roles:
                 if role_spec['name'] == 'admin':
-                    app_log.warning(
+                    self.log.warning(
                         "Configuration specifies both admin_users and users in the admin role specification. "
                         "If admin role is present in config, c.Authenticator.admin_users should not be used."
                     )
-                    app_log.info(
+                    self.log.info(
                         "Merging admin_users set with users list in admin role"
                     )
                     role_spec['users'] = set(role_spec.get('users', []))
                     role_spec['users'] |= config_admin_users
-        self.log.debug('Loading predefined roles from config file to database')
+        self.log.debug('Loading role assignments from config')
         has_admin_role_spec = {role_bearer: False for role_bearer in admin_role_objects}
-        for predef_role in self.load_roles:
-            predef_role_obj = orm.Role.find(db, name=predef_role['name'])
-            if predef_role['name'] == 'admin':
+        for role_spec in self.load_roles:
+            role = orm.Role.find(db, name=role_spec['name'])
+            role_name = role_spec["name"]
+            if role_name == 'admin':
                 for kind in admin_role_objects:
-                    has_admin_role_spec[kind] = kind in predef_role
+                    has_admin_role_spec[kind] = kind in role_spec
                     if has_admin_role_spec[kind]:
-                        app_log.info(f"Admin role specifies static {kind} list")
+                        self.log.info(f"Admin role specifies static {kind} list")
                     else:
-                        app_log.info(
+                        self.log.info(
                             f"Admin role does not specify {kind}, preserving admin membership in database"
                         )
             # add users, services, and/or groups,
             # tokens need to be checked for permissions
             for kind in kinds:
                 orm_role_bearers = []
-                if kind in predef_role.keys():
-                    for bname in predef_role[kind]:
+                if kind in role_spec:
+                    for name in role_spec[kind]:
                         if kind == 'users':
-                            bname = self.authenticator.normalize_username(bname)
+                            name = self.authenticator.normalize_username(name)
                             if not (
                                 await maybe_future(
-                                    self.authenticator.check_allowed(bname, None)
+                                    self.authenticator.check_allowed(name, None)
                                 )
                             ):
                                 raise ValueError(
-                                    "Username %r is not in Authenticator.allowed_users"
-                                    % bname
+                                    f"Username {name} is not in Authenticator.allowed_users"
                                 )
                         Class = orm.get_class(kind)
-                        orm_obj = Class.find(db, bname)
+                        orm_obj = Class.find(db, name)
                         if orm_obj is not None:
                             orm_role_bearers.append(orm_obj)
                         else:
-                            app_log.info(
-                                f"Found unexisting {kind} {bname} in role definition {predef_role['name']}"
+                            self.log.info(
+                                f"Found unexisting {kind} {name} in role definition {role_name}"
                             )
                             if kind == 'users':
-                                orm_obj = await self._get_or_create_user(bname)
+                                orm_obj = await self._get_or_create_user(name)
                                 orm_role_bearers.append(orm_obj)
                             elif kind == 'groups':
-                                group = orm.Group(name=bname)
+                                group = orm.Group(name=name)
                                 db.add(group)
                                 db.commit()
                                 orm_role_bearers.append(group)
                             else:
                                 raise ValueError(
-                                    f"{kind} {bname} defined in config role definition {predef_role['name']} but not present in database"
+                                    f"{kind} {name} defined in config role definition {role_name} but not present in database"
                                 )
                         # Ensure all with admin role have admin flag
-                        if predef_role['name'] == 'admin':
+                        if role_name == 'admin':
                             orm_obj.admin = True
-                setattr(predef_role_obj, kind, orm_role_bearers)
+                    # explicitly defined list
+                    # ensure membership list is exact match (adds and revokes permissions)
+                    setattr(role, kind, orm_role_bearers)
+                else:
+                    # no defined members
+                    # leaving 'users' undefined in overrides of the default 'user' role
+                    # should not clear membership on startup
+                    # since allowed users could be managed by the authenticator
+                    if kind == "users" and role_name == "user":
+                        # Default user lists can be managed by the Authenticator,
+                        # if unspecified in role config
+                        pass
+                    else:
+                        # otherwise, omitting a member category is equivalent to specifying an empty list
+                        setattr(role, kind, [])
+
         db.commit()
         if self.authenticator.allowed_users:
+            self.log.debug(
+                f"Assigning {len(self.authenticator.allowed_users)} allowed_users to the user role"
+            )
             allowed_users = db.query(orm.User).filter(
                 orm.User.name.in_(self.authenticator.allowed_users)
             )
@@ -2149,14 +2198,11 @@ class JupyterHub(Application):
         db.commit()
         # make sure that on hub upgrade, all users, services and tokens have at least one role (update with default)
         if getattr(self, '_rbac_upgrade', False):
-            app_log.warning(
-                "No admin role found; assuming hub upgrade. Initializing default roles for all entities"
+            self.log.warning(
+                "No roles found; assuming hub upgrade. Initializing default roles for all entities"
             )
             for kind in kinds:
                 roles.check_for_default_roles(db, kind)
-
-            # check tokens for default roles
-            roles.check_for_default_roles(db, bearer='tokens')
 
     async def _add_tokens(self, token_dict, kind):
         """Add tokens for users or services to the database"""
@@ -2322,21 +2368,34 @@ class JupyterHub(Application):
                 service.orm.server = None
 
             if service.oauth_available:
-                allowed_roles = []
+                allowed_scopes = set()
+                if service.oauth_client_allowed_scopes:
+                    allowed_scopes.update(service.oauth_client_allowed_scopes)
                 if service.oauth_roles:
-                    allowed_roles = list(
-                        self.db.query(orm.Role).filter(
-                            orm.Role.name.in_(service.oauth_roles)
+                    if not allowed_scopes:
+                        # DEPRECATED? It's still convenient and valid,
+                        # e.g. 'admin'
+                        allowed_roles = list(
+                            self.db.query(orm.Role).filter(
+                                orm.Role.name.in_(service.oauth_roles)
+                            )
                         )
-                    )
+                        allowed_scopes.update(roles.roles_to_scopes(allowed_roles))
+                    else:
+                        self.log.warning(
+                            f"Ignoring oauth_roles for {service.name}: {service.oauth_roles},"
+                            f" using oauth_client_allowed_scopes={allowed_scopes}."
+                        )
                 oauth_client = self.oauth_provider.add_client(
                     client_id=service.oauth_client_id,
                     client_secret=service.api_token,
                     redirect_uri=service.oauth_redirect_uri,
-                    allowed_roles=allowed_roles,
                     description="JupyterHub service %s" % service.name,
                 )
                 service.orm.oauth_client = oauth_client
+                # add access-scopes, derived from OAuthClient itself
+                allowed_scopes.update(scopes.access_scopes(oauth_client))
+                oauth_client.allowed_scopes = sorted(allowed_scopes)
             else:
                 if service.oauth_client:
                     self.db.delete(service.oauth_client)
@@ -3006,7 +3065,7 @@ class JupyterHub(Application):
             self.internal_ssl_key,
             self.internal_ssl_cert,
             cafile=self.internal_ssl_ca,
-            check_hostname=False,
+            purpose=ssl.Purpose.CLIENT_AUTH,
         )
 
         # start the webserver
@@ -3098,7 +3157,12 @@ class JupyterHub(Application):
             self.last_activity_callback = pc
             pc.start()
 
-        self.log.info("JupyterHub is now running at %s", self.proxy.public_url)
+        if self.proxy.should_start:
+            self.log.info("JupyterHub is now running at %s", self.proxy.public_url)
+        else:
+            self.log.info(
+                "JupyterHub is now running, internal Hub API at %s", self.hub.url
+            )
         # Use atexit for Windows, it doesn't have signal handling support
         if _mswindows:
             atexit.register(self.atexit)
@@ -3178,16 +3242,18 @@ class JupyterHub(Application):
         self._atexit_ran = True
         self._init_asyncio_patch()
         # run the cleanup step (in a new loop, because the interrupted one is unclean)
-        asyncio.set_event_loop(asyncio.new_event_loop())
-        IOLoop.clear_current()
-        loop = IOLoop()
-        loop.make_current()
-        loop.run_sync(self.cleanup)
+        asyncio.run(self.cleanup())
 
-    async def shutdown_cancel_tasks(self, sig):
+    async def shutdown_cancel_tasks(self, sig=None):
         """Cancel all other tasks of the event loop and initiate cleanup"""
-        self.log.critical("Received signal %s, initiating shutdown...", sig.name)
-        tasks = [t for t in asyncio_all_tasks() if t is not asyncio_current_task()]
+        if sig is None:
+            self.log.critical("Initiating shutdown...")
+        else:
+            self.log.critical("Received signal %s, initiating shutdown...", sig.name)
+
+        await self.cleanup()
+
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
 
         if tasks:
             self.log.debug("Cancelling pending tasks")
@@ -3200,10 +3266,9 @@ class JupyterHub(Application):
             except StopAsyncIteration as e:
                 self.log.error("Caught StopAsyncIteration Exception", exc_info=True)
 
-            tasks = [t for t in asyncio_all_tasks()]
+            tasks = [t for t in asyncio.all_tasks()]
             for t in tasks:
                 self.log.debug("Task status: %s", t)
-        await self.cleanup()
         asyncio.get_event_loop().stop()
 
     def stop(self):
@@ -3211,7 +3276,7 @@ class JupyterHub(Application):
             return
         if self.http_server:
             self.http_server.stop()
-        self.io_loop.add_callback(self.io_loop.stop)
+        self.io_loop.add_callback(self.shutdown_cancel_tasks)
 
     async def start_show_config(self):
         """Async wrapper around base start_show_config method"""
@@ -3237,16 +3302,19 @@ class JupyterHub(Application):
     def launch_instance(cls, argv=None):
         self = cls.instance()
         self._init_asyncio_patch()
-        loop = IOLoop.current()
-        task = asyncio.ensure_future(self.launch_instance_async(argv))
+        loop = IOLoop(make_current=False)
+
+        try:
+            loop.run_sync(partial(self.launch_instance_async, argv))
+        except Exception:
+            loop.close()
+            raise
+
         try:
             loop.start()
         except KeyboardInterrupt:
             print("\nInterrupted")
         finally:
-            if task.done():
-                # re-raise exceptions in launch_instance_async
-                task.result()
             loop.stop()
             loop.close()
 

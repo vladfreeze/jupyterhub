@@ -10,7 +10,15 @@ c.JupyterHub.services = [
         'name': 'whoami-oauth',
         'url': 'http://127.0.0.1:10102',
         'command': [sys.executable, './whoami-oauth.py'],
-        'oauth_roles': ['user'],
+        # the default oauth roles is minimal,
+        # only requesting access to the service,
+        # and identification by name,
+        # nothing more.
+        # Specifying 'oauth_client_allowed_scopes' as a list of scopes
+        # allows requesting more information about users,
+        # or the ability to take actions on users' behalf, as required.
+        # the 'inherit' scope means the full permissions of the owner
+        # 'oauth_client_allowed_scopes': ['inherit'],
     },
 ]
 

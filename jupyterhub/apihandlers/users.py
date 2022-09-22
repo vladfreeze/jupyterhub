@@ -3,26 +3,25 @@
 # Distributed under the terms of the Modified BSD License.
 import asyncio
 import json
-from datetime import datetime
-from datetime import timedelta
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 
 from async_generator import aclosing
 from dateutil.parser import parse as parse_date
-from sqlalchemy import func
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from tornado import web
 from tornado.iostream import StreamClosedError
 
-from .. import orm
-from .. import scopes
+from .. import orm, scopes
 from ..roles import assign_default_roles
 from ..scopes import needs_scope
 from ..user import User
-from ..utils import isoformat
-from ..utils import iterate_until
-from ..utils import maybe_future
-from ..utils import url_path_join
+from ..utils import (
+    isoformat,
+    iterate_until,
+    maybe_future,
+    url_escape_path,
+    url_path_join,
+)
 from .base import APIHandler
 
 
@@ -51,12 +50,20 @@ class SelfAPIHandler(APIHandler):
         for scope in identify_scopes:
             if scope not in self.expanded_scopes:
                 _added_scopes.add(scope)
-                self.expanded_scopes.add(scope)
+                self.expanded_scopes |= {scope}
         if _added_scopes:
             # re-parse with new scopes
             self.parsed_scopes = scopes.parse_scopes(self.expanded_scopes)
 
         model = get_model(user)
+
+        # add session_id associated with token
+        # added in 2.0
+        token = self.get_token()
+        if token:
+            model["session_id"] = token.session_id
+        else:
+            model["session_id"] = None
 
         # add scopes to identify model,
         # but not the scopes we added to ensure we could read our own model
@@ -76,6 +83,7 @@ class UserListAPIHandler(APIHandler):
     @needs_scope('list:users')
     def get(self):
         state_filter = self.get_argument("state", None)
+        name_filter = self.get_argument("name_filter", None)
         offset, limit = self.get_api_pagination()
 
         # post_filter
@@ -122,7 +130,7 @@ class UserListAPIHandler(APIHandler):
             if not set(sub_scope).issubset({'group', 'user'}):
                 # don't expand invalid !server=x filter to all users!
                 self.log.warning(
-                    "Invalid filter on list:user for {self.current_user}: {sub_scope}"
+                    f"Invalid filter on list:user for {self.current_user}: {sub_scope}"
                 )
                 raise web.HTTPError(403)
             filters = []
@@ -139,6 +147,9 @@ class UserListAPIHandler(APIHandler):
                 query = query.filter(filters[0])
             else:
                 query = query.filter(or_(*filters))
+
+        if name_filter:
+            query = query.filter(orm.User.name.ilike(f'%{name_filter}%'))
 
         full_query = query
         query = query.order_by(orm.User.id.asc()).offset(offset).limit(limit)
@@ -394,21 +405,18 @@ class UserTokenListAPIHandler(APIHandler):
             if requester is not user:
                 note += f" by {kind} {requester.name}"
 
-        token_roles = body.get('roles')
+        token_roles = body.get("roles")
+        token_scopes = body.get("scopes")
+
         try:
             api_token = user.new_api_token(
                 note=note,
                 expires_in=body.get('expires_in', None),
                 roles=token_roles,
+                scopes=token_scopes,
             )
-        except KeyError:
-            raise web.HTTPError(404, "Requested roles %r not found" % token_roles)
-        except ValueError:
-            raise web.HTTPError(
-                403,
-                "Requested roles %r cannot have higher permissions than the token owner"
-                % token_roles,
-            )
+        except ValueError as e:
+            raise web.HTTPError(400, str(e))
         if requester is not user:
             self.log.info(
                 "%s %s requested API token for %s",
@@ -507,7 +515,7 @@ class UserServerAPIHandler(APIHandler):
                             user_name, self.named_server_limit_per_user
                         ),
                     )
-        spawner = user.spawners[server_name]
+        spawner = user.get_spawner(server_name, replace_failed=True)
         pending = spawner.pending
         if pending == 'spawn':
             self.set_header('Content-Type', 'text/plain')
@@ -683,7 +691,7 @@ class SpawnProgressAPIHandler(APIHandler):
         # - spawner not running at all
         # - spawner failed
         # - spawner pending start (what we expect)
-        url = url_path_join(user.url, server_name, '/')
+        url = url_path_join(user.url, url_escape_path(server_name), '/')
         ready_event = {
             'progress': 100,
             'ready': True,
@@ -706,7 +714,12 @@ class SpawnProgressAPIHandler(APIHandler):
             # check if spawner has just failed
             f = spawn_future
             if f and f.done() and f.exception():
-                failed_event['message'] = "Spawn failed: %s" % f.exception()
+                exc = f.exception()
+                message = getattr(exc, "jupyterhub_message", str(exc))
+                failed_event['message'] = f"Spawn failed: {message}"
+                html_message = getattr(exc, "jupyterhub_html_message", "")
+                if html_message:
+                    failed_event['html_message'] = html_message
                 await self.send_event(failed_event)
                 return
             else:
@@ -739,7 +752,12 @@ class SpawnProgressAPIHandler(APIHandler):
             # what happened? Maybe spawn failed?
             f = spawn_future
             if f and f.done() and f.exception():
-                failed_event['message'] = "Spawn failed: %s" % f.exception()
+                exc = f.exception()
+                message = getattr(exc, "jupyterhub_message", str(exc))
+                failed_event['message'] = f"Spawn failed: {message}"
+                html_message = getattr(exc, "jupyterhub_html_message", "")
+                if html_message:
+                    failed_event['html_message'] = html_message
             else:
                 self.log.warning(
                     "Server %s didn't start for unknown reason", spawner._log_name

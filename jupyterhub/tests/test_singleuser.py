@@ -1,27 +1,20 @@
 """Tests for jupyterhub.singleuser"""
 import os
 import sys
-from contextlib import contextmanager
-from subprocess import CalledProcessError
-from subprocess import check_output
+from contextlib import contextmanager, nullcontext
+from subprocess import CalledProcessError, check_output
 from unittest import mock
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import pytest
+from bs4 import BeautifulSoup
 
 import jupyterhub
+
 from .. import orm
 from ..utils import url_path_join
-from .mocking import public_url
-from .mocking import StubSingleUserSpawner
-from .utils import async_requests
-from .utils import AsyncSession
-
-
-@contextmanager
-def nullcontext():
-    """Python 3.7+ contextlib.nullcontext, backport for 3.6"""
-    yield
+from .mocking import StubSingleUserSpawner, public_url
+from .utils import AsyncSession, async_requests, get_page
 
 
 @pytest.mark.parametrize(
@@ -196,10 +189,22 @@ def test_singleuser_app_class(JUPYTERHUB_SINGLEUSER_APP):
         import jupyter_server  # noqa
     except ImportError:
         have_server = False
-        expect_error = "jupyter_server" in JUPYTERHUB_SINGLEUSER_APP
     else:
         have_server = True
-        expect_error = False
+    try:
+        import notebook.notebookapp  # noqa
+    except ImportError:
+        have_notebook = False
+    else:
+        have_notebook = True
+
+    if JUPYTERHUB_SINGLEUSER_APP.startswith("notebook."):
+        expect_error = not have_notebook
+    elif JUPYTERHUB_SINGLEUSER_APP.startswith("jupyter_server."):
+        expect_error = not have_server
+    else:
+        # not specified, will try both
+        expect_error = not (have_server or have_notebook)
 
     if expect_error:
         ctx = pytest.raises(CalledProcessError)
@@ -225,3 +230,22 @@ def test_singleuser_app_class(JUPYTERHUB_SINGLEUSER_APP):
     else:
         assert '--ServerApp.' in out
         assert '--NotebookApp.' not in out
+
+
+async def test_nbclassic_control_panel(app, user):
+    # use StubSingleUserSpawner to launch a single-user app in a thread
+    app.spawner_class = StubSingleUserSpawner
+    app.tornado_settings['spawner_class'] = StubSingleUserSpawner
+
+    # login, start the server
+    await user.spawn()
+    cookies = await app.login_user(user.name)
+    next_url = url_path_join(user.url, "tree/")
+    url = '/?' + urlencode({'next': next_url})
+    r = await get_page(url, app, cookies=cookies)
+    r.raise_for_status()
+    assert urlparse(r.url).path == urlparse(next_url).path
+    page = BeautifulSoup(r.text, "html.parser")
+    link = page.find("a", id="jupyterhub-control-panel-link")
+    assert link, f"Missing jupyterhub-control-panel-link in {page}"
+    assert link["href"] == url_path_join(app.base_url, "hub/home")

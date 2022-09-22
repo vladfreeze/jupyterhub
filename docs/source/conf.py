@@ -21,6 +21,7 @@ extensions = [
     'myst_parser',
 ]
 
+myst_heading_anchors = 2
 myst_enable_extensions = [
     'colon_fence',
     'deflist',
@@ -47,7 +48,7 @@ version = '%i.%i' % jupyterhub.version_info[:2]
 # The full version, including alpha/beta/rc tags.
 release = jupyterhub.__version__
 
-language = None
+language = "en"
 exclude_patterns = []
 pygments_style = 'sphinx'
 todo_include_todos = False
@@ -55,12 +56,14 @@ todo_include_todos = False
 # Set the default role so we can use `foo` instead of ``foo``
 default_role = 'literal'
 
-# -- Config -------------------------------------------------------------
-from jupyterhub.app import JupyterHub
-from docutils import nodes
-from sphinx.directives.other import SphinxDirective
 from contextlib import redirect_stdout
 from io import StringIO
+
+from docutils import nodes
+from sphinx.directives.other import SphinxDirective
+
+# -- Config -------------------------------------------------------------
+from jupyterhub.app import JupyterHub
 
 # create a temp instance of JupyterHub just to get the output of the generate-config
 # and help --all commands.
@@ -129,6 +132,30 @@ html_favicon = '_static/images/logo/favicon.ico'
 html_static_path = ['_static']
 
 htmlhelp_basename = 'JupyterHubdoc'
+
+html_theme_options = {
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/jupyterhub/jupyterhub",
+            "icon": "fab fa-github-square",
+        },
+        {
+            "name": "Discourse",
+            "url": "https://discourse.jupyter.org/c/jupyterhub/10",
+            "icon": "fab fa-discourse",
+        },
+    ],
+    "use_edit_page_button": True,
+    "navbar_align": "left",
+}
+
+html_context = {
+    "github_user": "jupyterhub",
+    "github_repo": "jupyterhub",
+    "github_version": "main",
+    "doc_path": "docs",
+}
 
 # -- Options for LaTeX output ---------------------------------------------
 
@@ -205,7 +232,10 @@ epub_exclude_files = ['search.html']
 
 # -- Intersphinx ----------------------------------------------------------
 
-intersphinx_mapping = {'https://docs.python.org/3/': None}
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3/', None),
+    'tornado': ('https://www.tornadoweb.org/en/stable/', None),
+}
 
 # -- Read The Docs --------------------------------------------------------
 

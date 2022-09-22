@@ -9,48 +9,44 @@ import random
 import re
 import time
 import uuid
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 from http.client import responses
-from urllib.parse import parse_qs
-from urllib.parse import parse_qsl
-from urllib.parse import urlencode
-from urllib.parse import urlparse
-from urllib.parse import urlunparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
 from jinja2 import TemplateNotFound
 from sqlalchemy.exc import SQLAlchemyError
-from tornado import gen
-from tornado import web
-from tornado.httputil import HTTPHeaders
-from tornado.httputil import url_concat
+from tornado import gen, web
+from tornado.httputil import HTTPHeaders, url_concat
 from tornado.ioloop import IOLoop
 from tornado.log import app_log
-from tornado.web import addslash
-from tornado.web import RequestHandler
+from tornado.web import RequestHandler, addslash
 
-from .. import __version__
-from .. import orm
-from .. import roles
-from .. import scopes
-from ..metrics import PROXY_ADD_DURATION_SECONDS
-from ..metrics import PROXY_DELETE_DURATION_SECONDS
-from ..metrics import ProxyDeleteStatus
-from ..metrics import RUNNING_SERVERS
-from ..metrics import SERVER_POLL_DURATION_SECONDS
-from ..metrics import SERVER_SPAWN_DURATION_SECONDS
-from ..metrics import SERVER_STOP_DURATION_SECONDS
-from ..metrics import ServerPollStatus
-from ..metrics import ServerSpawnStatus
-from ..metrics import ServerStopStatus
-from ..metrics import TOTAL_USERS
+from .. import __version__, orm, roles, scopes
+from ..metrics import (
+    PROXY_ADD_DURATION_SECONDS,
+    PROXY_DELETE_DURATION_SECONDS,
+    RUNNING_SERVERS,
+    SERVER_POLL_DURATION_SECONDS,
+    SERVER_SPAWN_DURATION_SECONDS,
+    SERVER_STOP_DURATION_SECONDS,
+    TOTAL_USERS,
+    ProxyDeleteStatus,
+    ServerPollStatus,
+    ServerSpawnStatus,
+    ServerStopStatus,
+)
 from ..objects import Server
+from ..scopes import needs_scope
 from ..spawner import LocalProcessSpawner
 from ..user import User
-from ..utils import AnyTimeoutError
-from ..utils import get_accepted_mimetype
-from ..utils import maybe_future
-from ..utils import url_path_join
+from ..utils import (
+    AnyTimeoutError,
+    get_accepted_mimetype,
+    get_browser_protocol,
+    maybe_future,
+    url_escape_path,
+    url_path_join,
+)
 
 # pattern for the authentication token header
 auth_header_pat = re.compile(r'^(?:token|bearer)\s+([^\s]+)$', flags=re.IGNORECASE)
@@ -70,6 +66,12 @@ SESSION_COOKIE_NAME = 'jupyterhub-session-id'
 
 class BaseHandler(RequestHandler):
     """Base Handler class with access to common methods and properties."""
+
+    # by default, only accept cookie-based authentication
+    # The APIHandler base class enables token auth
+    # versionadded: 2.0
+    _accept_cookie_auth = True
+    _accept_token_auth = False
 
     async def prepare(self):
         """Identify the user during the prepare stage of each request
@@ -340,6 +342,7 @@ class BaseHandler(RequestHandler):
             auth_info['auth_state'] = await user.get_auth_state()
         return await self.auth_to_user(auth_info, user)
 
+    @functools.lru_cache()
     def get_token(self):
         """get token from authorization header"""
         token = self.get_auth_token()
@@ -410,9 +413,11 @@ class BaseHandler(RequestHandler):
     async def get_current_user(self):
         """get current username"""
         if not hasattr(self, '_jupyterhub_user'):
+            user = None
             try:
-                user = self.get_current_user_token()
-                if user is None:
+                if self._accept_token_auth:
+                    user = self.get_current_user_token()
+                if user is None and self._accept_cookie_auth:
                     user = self.get_current_user_cookie()
                 if user and isinstance(user, User):
                     user = await self.refresh_auth(user)
@@ -515,10 +520,16 @@ class BaseHandler(RequestHandler):
             path=url_path_join(self.base_url, 'services'),
             **kwargs,
         )
-        # clear tornado cookie
+        # clear_cookie only accepts a subset of set_cookie's kwargs
+        clear_xsrf_cookie_kwargs = {
+            key: value
+            for key, value in self.settings.get('xsrf_cookie_kwargs', {}).items()
+            if key in {"path", "domain"}
+        }
+
         self.clear_cookie(
             '_xsrf',
-            **self.settings.get('xsrf_cookie_kwargs', {}),
+            **clear_xsrf_cookie_kwargs,
         )
         # Reset _jupyterhub_user
         self._jupyterhub_user = None
@@ -623,33 +634,34 @@ class BaseHandler(RequestHandler):
         next_url = self.get_argument('next', default='')
         # protect against some browsers' buggy handling of backslash as slash
         next_url = next_url.replace('\\', '%5C')
-        if (next_url + '/').startswith(
-            (
-                f'{self.request.protocol}://{self.request.host}/',
-                f'//{self.request.host}/',
-            )
-        ) or (
+        proto = get_browser_protocol(self.request)
+        host = self.request.host
+        if next_url.startswith("///"):
+            # strip more than 2 leading // down to 2
+            # because urlparse treats that as empty netloc,
+            # whereas browsers treat more than two leading // the same as //,
+            # so netloc is the first non-/ bit
+            next_url = "//" + next_url.lstrip("/")
+        parsed_next_url = urlparse(next_url)
+
+        if (next_url + '/').startswith((f'{proto}://{host}/', f'//{host}/',)) or (
             self.subdomain_host
-            and urlparse(next_url).netloc
-            and ("." + urlparse(next_url).netloc).endswith(
+            and parsed_next_url.netloc
+            and ("." + parsed_next_url.netloc).endswith(
                 "." + urlparse(self.subdomain_host).netloc
             )
         ):
             # treat absolute URLs for our host as absolute paths:
-            # below, redirects that aren't strictly paths
-            parsed = urlparse(next_url)
-            next_url = parsed.path
-            if parsed.query:
-                next_url = next_url + '?' + parsed.query
-            if parsed.fragment:
-                next_url = next_url + '#' + parsed.fragment
+            # below, redirects that aren't strictly paths are rejected
+            next_url = parsed_next_url.path
+            if parsed_next_url.query:
+                next_url = next_url + '?' + parsed_next_url.query
+            if parsed_next_url.fragment:
+                next_url = next_url + '#' + parsed_next_url.fragment
+            parsed_next_url = urlparse(next_url)
 
         # if it still has host info, it didn't match our above check for *this* host
-        if next_url and (
-            '://' in next_url
-            or next_url.startswith('//')
-            or not next_url.startswith('/')
-        ):
+        if next_url and (parsed_next_url.netloc or not next_url.startswith('/')):
             self.log.warning("Disallowing redirect outside JupyterHub: %r", next_url)
             next_url = ''
 
@@ -762,15 +774,25 @@ class BaseHandler(RequestHandler):
         # Only set `admin` if the authenticator returned an explicit value.
         if admin is not None and admin != user.admin:
             user.admin = admin
-            roles.assign_default_roles(self.db, entity=user)
-            self.db.commit()
+        # always ensure default roles ('user', 'admin' if admin) are assigned
+        # after a successful login
+        roles.assign_default_roles(self.db, entity=user)
+
+        # apply authenticator-managed groups
+        if self.authenticator.manage_groups:
+            group_names = authenticated.get("groups")
+            if group_names is not None:
+                user.sync_groups(group_names)
+
         # always set auth_state and commit,
         # because there could be key-rotation or clearing of previous values
         # going on.
         if not self.authenticator.enable_auth_state:
             # auth_state is not enabled. Force None.
             auth_state = None
+
         await user.save_auth_state(auth_state)
+
         return user
 
     async def login_user(self, data=None):
@@ -784,6 +806,7 @@ class BaseHandler(RequestHandler):
             self.set_login_cookie(user)
             self.statsd.incr('login.success')
             self.statsd.timing('login.authenticate.success', auth_timer.ms)
+
             self.log.info("User logged in: %s", user.name)
             user._auth_refreshed = time.monotonic()
             return user
@@ -833,6 +856,12 @@ class BaseHandler(RequestHandler):
         user_server_name = user.name
 
         if server_name:
+            if '/' in server_name:
+                error_message = (
+                    f"Invalid server_name (may not contain '/'): {server_name}"
+                )
+                self.log.error(error_message)
+                raise web.HTTPError(400, error_message)
             user_server_name = f'{user.name}:{server_name}'
 
         if server_name in user.spawners and user.spawners[server_name].pending:
@@ -1372,6 +1401,9 @@ class UserUrlHandler(BaseHandler):
     Note that this only occurs if bob's server is not already running.
     """
 
+    # accept token auth for API requests that are probably to non-running servers
+    _accept_token_auth = True
+
     def _fail_api_request(self, user_name='', server_name=''):
         """Fail an API request to a not-running server"""
         self.log.warning(
@@ -1436,54 +1468,24 @@ class UserUrlHandler(BaseHandler):
     delete = non_get
 
     @web.authenticated
+    @needs_scope("access:servers")
     async def get(self, user_name, user_path):
         if not user_path:
             user_path = '/'
         current_user = self.current_user
-
-        if (
-            current_user
-            and current_user.name != user_name
-            and current_user.admin
-            and self.settings.get('admin_access', False)
-        ):
-            # allow admins to spawn on behalf of users
+        if user_name != current_user.name:
             user = self.find_user(user_name)
             if user is None:
                 # no such user
-                raise web.HTTPError(404, "No such user %s" % user_name)
+                raise web.HTTPError(404, f"No such user {user_name}")
             self.log.info(
-                "Admin %s requesting spawn on behalf of %s",
-                current_user.name,
-                user.name,
+                f"User {current_user.name} requesting spawn on behalf of {user.name}"
             )
             admin_spawn = True
             should_spawn = True
             redirect_to_self = False
         else:
             user = current_user
-            admin_spawn = False
-            # For non-admins, spawn if the user requested is the current user
-            # otherwise redirect users to their own server
-            should_spawn = current_user and current_user.name == user_name
-            redirect_to_self = not should_spawn
-
-        if redirect_to_self:
-            # logged in as a different non-admin user, redirect to user's own server
-            # this is only a stop-gap for a common mistake,
-            # because the same request will be a 403
-            # if the requested server is running
-            self.statsd.incr('redirects.user_to_user', 1)
-            self.log.warning(
-                "User %s requested server for %s, which they don't own",
-                current_user.name,
-                user_name,
-            )
-            target = url_path_join(current_user.url, user_path or '')
-            if self.request.query:
-                target = url_concat(target, parse_qsl(self.request.query))
-            self.redirect(target)
-            return
 
         # If people visit /user/:user_name directly on the Hub,
         # the redirects will just loop, because the proxy is bypassed.
@@ -1518,6 +1520,7 @@ class UserUrlHandler(BaseHandler):
                 server_name = ''
         else:
             server_name = ''
+        escaped_server_name = url_escape_path(server_name)
         spawner = user.spawners[server_name]
 
         if spawner.ready:
@@ -1527,20 +1530,19 @@ class UserUrlHandler(BaseHandler):
 
         # if request is expecting JSON, assume it's an API request and fail with 503
         # because it won't like the redirect to the pending page
-        if (
-            get_accepted_mimetype(
-                self.request.headers.get('Accept', ''),
-                choices=['application/json', 'text/html'],
-            )
-            == 'application/json'
-            or 'api' in user_path.split('/')
-        ):
+        if get_accepted_mimetype(
+            self.request.headers.get('Accept', ''),
+            choices=['application/json', 'text/html'],
+        ) == 'application/json' or 'api' in user_path.split('/'):
             self._fail_api_request(user_name, server_name)
             return
 
         pending_url = url_concat(
             url_path_join(
-                self.hub.base_url, 'spawn-pending', user.escaped_name, server_name
+                self.hub.base_url,
+                'spawn-pending',
+                user.escaped_name,
+                escaped_server_name,
             ),
             {'next': self.request.uri},
         )
@@ -1554,7 +1556,9 @@ class UserUrlHandler(BaseHandler):
         # page *in* the server is not found, we return a 424 instead of a 404.
         # We allow retaining the old behavior to support older JupyterLab versions
         spawn_url = url_concat(
-            url_path_join(self.hub.base_url, "spawn", user.escaped_name, server_name),
+            url_path_join(
+                self.hub.base_url, "spawn", user.escaped_name, escaped_server_name
+            ),
             {"next": self.request.uri},
         )
         self.set_status(
@@ -1616,7 +1620,7 @@ class UserUrlHandler(BaseHandler):
         if redirects:
             self.log.warning("Redirect loop detected on %s", self.request.uri)
             # add capped exponential backoff where cap is 10s
-            await asyncio.sleep(min(1 * (2 ** redirects), 10))
+            await asyncio.sleep(min(1 * (2**redirects), 10))
             # rewrite target url with new `redirects` query value
             url_parts = urlparse(target)
             query_parts = parse_qs(url_parts.query)

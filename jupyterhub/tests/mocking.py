@@ -37,23 +37,15 @@ from urllib.parse import urlparse
 
 from pamela import PAMError
 from tornado.ioloop import IOLoop
-from traitlets import Bool
-from traitlets import default
-from traitlets import Dict
+from traitlets import Bool, Dict, default
 
-from .. import metrics
-from .. import orm
-from .. import roles
+from .. import metrics, orm, roles
 from ..app import JupyterHub
 from ..auth import PAMAuthenticator
 from ..singleuser import SingleUserNotebookApp
 from ..spawner import SimpleLocalProcessSpawner
-from ..utils import random_port
-from ..utils import utcnow
-from .utils import async_requests
-from .utils import public_host
-from .utils import public_url
-from .utils import ssl_setup
+from ..utils import random_port, utcnow
+from .utils import async_requests, public_host, public_url, ssl_setup
 
 
 def mock_authenticate(username, password, service, encoding):
@@ -333,26 +325,28 @@ class MockHub(JupyterHub):
         roles.assign_default_roles(self.db, entity=user)
         self.db.commit()
 
-    def stop(self):
-        super().stop()
+    _stop_called = False
 
+    def stop(self):
+        if self._stop_called:
+            return
+        self._stop_called = True
         # run cleanup in a background thread
         # to avoid multiple eventloops in the same thread errors from asyncio
 
         def cleanup():
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            loop = IOLoop.current()
-            loop.run_sync(self.cleanup)
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(self.cleanup())
             loop.close()
 
-        pool = ThreadPoolExecutor(1)
-        f = pool.submit(cleanup)
-        # wait for cleanup to finish
-        f.result()
-        pool.shutdown()
+        with ThreadPoolExecutor(1) as pool:
+            f = pool.submit(cleanup)
+            # wait for cleanup to finish
+            f.result()
 
-        # ignore the call that will fire in atexit
-        self.cleanup = lambda: None
+        # prevent redundant atexit from running
+        self._atexit_ran = True
+        super().stop()
         self.db_file.close()
 
     async def login_user(self, name):
@@ -417,14 +411,10 @@ class StubSingleUserSpawner(MockSpawner):
         print(args, env)
 
         def _run():
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            io_loop = IOLoop()
-            io_loop.make_current()
-            io_loop.add_callback(lambda: evt.set())
-
             with mock.patch.dict(os.environ, env):
                 app = self._app = MockSingleUserServer()
                 app.initialize(args)
+                app.io_loop.add_callback(lambda: evt.set())
                 assert app.hub_auth.oauth_client_id
                 assert app.hub_auth.api_token
                 assert app.hub_auth.oauth_scopes

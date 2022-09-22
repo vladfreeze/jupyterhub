@@ -1,3 +1,5 @@
+(rest-api)=
+
 # Using JupyterHub's REST API
 
 This section will give you information on:
@@ -111,7 +113,6 @@ c.JupyterHub.load_roles = [
         "scopes": [
             # specify the permissions the token should have
             "admin:users",
-            "admin:services",
         ],
         "services": [
             # assign the service the above permissions
