@@ -13,7 +13,7 @@ Three (3) configuration settings are the main aspects of security configuration:
 3. Proxy :ref:`authentication token <authentication-token>` (used for the Hub and
    other services to authenticate to the Proxy)
 
-The Hub hashes all secrets (e.g., auth tokens) before storing them in its
+The Hub hashes all secrets (e.g. auth tokens) before storing them in its
 database. A loss of control over read-access to the database should have
 minimal impact on your deployment. If your database has been compromised, it
 is still a good idea to revoke existing tokens.
@@ -76,9 +76,9 @@ In certain cases, for example, if the hub is running behind a reverse proxy, and
 `SSL termination is being provided by NGINX <https://www.nginx.com/resources/admin-guide/nginx-ssl-termination/>`_,
 it is reasonable to run the hub without SSL.
 
-To achieve this, simply omit the configuration settings
-``c.JupyterHub.ssl_key`` and ``c.JupyterHub.ssl_cert``
-(setting them to ``None`` does not have the same effect, but results in an error).
+To achieve this, remove ``c.JupyterHub.ssl_key`` and ``c.JupyterHub.ssl_cert``
+from your configuration (setting them to ``None`` or an empty string does not
+have the same effect, and will result in an error).
 
 .. _authentication-token:
 
@@ -118,7 +118,7 @@ This environment variable needs to be visible to the Hub and Proxy.
 Default if token is not set
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you don't set the Proxy authentication token, the Hub will generate a random
+If you do not set the Proxy authentication token, the Hub will generate a random
 key itself. This means that any time you restart the Hub, you **must also
 restart the Proxy**. If the proxy is a subprocess of the Hub, this should happen
 automatically (this is the default configuration).
@@ -232,7 +232,7 @@ jupyterhub-session-id
 This is a random string, meaningless in itself, and the only cookie
 shared by the Hub and single-user servers.
 
-Its sole purpose is to coordinate logout of the multiple OAuth cookies.
+Its sole purpose is to coordinate the logout of the multiple OAuth cookies.
 
 This cookie is set to ``/`` so all endpoints can receive it, clear it, etc.
 

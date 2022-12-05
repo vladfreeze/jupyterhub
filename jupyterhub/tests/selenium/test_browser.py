@@ -1,21 +1,14 @@
 import asyncio
-import time
 from functools import partial
 
 import pytest
-from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from tornado.escape import url_escape
 from tornado.httputil import url_concat
 
-from jupyterhub.tests.selenium.locators import (
-    HomePageLocators,
-    LoginPageLocators,
-    TokenPageLocators,
-)
+from jupyterhub.tests.selenium.locators import LoginPageLocators
 from jupyterhub.utils import exponential_backoff
 
 from ...utils import url_path_join
@@ -95,9 +88,8 @@ def clear(browser, by_locator):
 # LOGIN PAGE
 async def test_elements_of_login_page(app, browser):
     await open_url(app, browser)
-    logo = is_displayed(browser, LoginPageLocators.LOGO)
+    assert is_displayed(browser, LoginPageLocators.LOGO)
     logo_text = browser.find_element(*LoginPageLocators.LOGO).get_attribute("innerHTML")
-    assert logo == True
 
 
 async def login(browser, user, pass_w):
@@ -193,10 +185,11 @@ async def test_open_url_login(
         assert next_url.endswith("spawn?param=value")
         assert f"user/{user}/" not in next_url
     else:
-        if next_url.endswith(f"/user/{user}/") == False:
+        if not next_url.endswith(f"/user/{user}/"):
             await webdriver_wait(
                 browser, EC.url_to_be(ujoin(public_url(app), f"/user/{user}/"))
             )
+            next_url = browser.current_url
         assert next_url.endswith(f"/user/{user}/")
 
 
