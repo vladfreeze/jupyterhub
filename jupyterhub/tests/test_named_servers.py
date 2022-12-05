@@ -11,9 +11,9 @@ from tornado.httputil import url_concat
 
 from .. import orm
 from ..utils import url_escape_path, url_path_join
-from .mocking import FormSpawner, public_url
+from .mocking import FormSpawner
 from .test_api import TIMESTAMP, add_user, api_request, fill_user, normalize_user
-from .utils import async_requests, get_page
+from .utils import async_requests, get_page, public_url
 
 
 @pytest.fixture
@@ -21,6 +21,25 @@ def named_servers(app):
     with mock.patch.dict(
         app.tornado_settings,
         {'allow_named_servers': True, 'named_server_limit_per_user': 2},
+    ):
+        yield
+
+
+@pytest.fixture
+def named_servers_with_callable_limit(app):
+    def named_server_limit_per_user_fn(handler):
+        """Limit number of named servers to `2` for non-admin users. No limit for admin users."""
+        user = handler.current_user
+        if user and user.admin:
+            return 0
+        return 2
+
+    with mock.patch.dict(
+        app.tornado_settings,
+        {
+            'allow_named_servers': True,
+            'named_server_limit_per_user': named_server_limit_per_user_fn,
+        },
     ):
         yield
 
@@ -290,6 +309,57 @@ async def test_named_server_limit(app, named_servers):
     r.raise_for_status()
     assert r.status_code == 201
     assert r.text == ''
+
+
+@pytest.mark.parametrize(
+    'username,admin',
+    [
+        ('nonsuperfoo', False),
+        ('superfoo', True),
+    ],
+)
+async def test_named_server_limit_as_callable(
+    app, named_servers_with_callable_limit, username, admin
+):
+    """Test named server limit based on `named_server_limit_per_user_fn` callable"""
+    user = add_user(app.db, app, name=username, admin=admin)
+    cookies = await app.login_user(username)
+
+    # Create 1st named server
+    servername1 = 'bar-1'
+    r = await api_request(
+        app, 'users', username, 'servers', servername1, method='post', cookies=cookies
+    )
+    r.raise_for_status()
+    assert r.status_code == 201
+    assert r.text == ''
+
+    # Create 2nd named server
+    servername2 = 'bar-2'
+    r = await api_request(
+        app, 'users', username, 'servers', servername2, method='post', cookies=cookies
+    )
+    r.raise_for_status()
+    assert r.status_code == 201
+    assert r.text == ''
+
+    # Create 3rd named server
+    servername3 = 'bar-3'
+    r = await api_request(
+        app, 'users', username, 'servers', servername3, method='post', cookies=cookies
+    )
+
+    # No named server limit for admin users as in `named_server_limit_per_user_fn` callable
+    if admin:
+        r.raise_for_status()
+        assert r.status_code == 201
+        assert r.text == ''
+    else:
+        assert r.status_code == 400
+        assert r.json() == {
+            "status": 400,
+            "message": f"User {username} already has the maximum of 2 named servers.  One must be deleted before a new server can be created",
+        }
 
 
 async def test_named_server_spawn_form(app, username, named_servers):

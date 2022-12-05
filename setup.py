@@ -121,6 +121,27 @@ setup_args = dict(
         'Source': 'https://github.com/jupyterhub/jupyterhub/',
         'Tracker': 'https://github.com/jupyterhub/jupyterhub/issues',
     },
+    extras_require={
+        "test": [
+            "beautifulsoup4[html5lib]",
+            "coverage",
+            # cryptography is an optional dependency for jupyterhub that we test
+            # against by default
+            "cryptography",
+            "jsonschema",
+            "jupyterlab>=3",
+            "mock",
+            # nbclassic provides the '/tree/' handler that we tests against in
+            # the test test_nbclassic_control_panel.
+            "nbclassic",
+            "pytest>=3.3",
+            "pytest-asyncio>=0.17",
+            "pytest-cov",
+            "requests-mock",
+            "selenium",
+            "virtualenv",
+        ],
+    },
 )
 
 
@@ -168,9 +189,6 @@ class NPM(BaseCommand):
     bower_dir = pjoin(static, 'components')
 
     def should_run(self):
-        if not shutil.which('npm'):
-            print("npm unavailable", file=sys.stderr)
-            return False
         if not os.path.exists(self.bower_dir):
             return True
         if not os.path.exists(self.node_modules):
@@ -195,6 +213,7 @@ class NPM(BaseCommand):
         os.utime(self.bower_dir)
         # update data-files in case this created new files
         self.distribution.data_files = get_data_files()
+        assert not self.should_run(), 'NPM.run failed'
 
 
 class CSS(BaseCommand):
@@ -255,6 +274,7 @@ class CSS(BaseCommand):
             raise
         # update data-files in case this created new files
         self.distribution.data_files = get_data_files()
+        assert not self.should_run(), 'CSS.run failed'
 
 
 class JSX(BaseCommand):
@@ -314,6 +334,7 @@ class JSX(BaseCommand):
 
         # update data-files in case this created new files
         self.distribution.data_files = get_data_files()
+        assert not self.should_run(), 'JSX.run failed'
 
 
 def js_css_first(cls, strict=True):

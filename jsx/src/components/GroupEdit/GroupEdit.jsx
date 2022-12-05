@@ -93,7 +93,6 @@ const GroupEdit = (props) => {
             setProp={setProp}
             setPropKeys={setPropKeys}
             setPropValues={setPropValues}
-
             //Add keys
           />
         </div>
@@ -111,10 +110,10 @@ const GroupEdit = (props) => {
             className="btn btn-primary"
             onClick={() => {
               let new_users = selected.filter(
-                (e) => !group_data.users.includes(e)
+                (e) => !group_data.users.includes(e),
               );
               let removed_users = group_data.users.filter(
-                (e) => !selected.includes(e)
+                (e) => !selected.includes(e),
               );
               let promiseQueue = [];
               // check for changes

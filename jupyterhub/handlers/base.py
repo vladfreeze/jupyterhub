@@ -248,6 +248,17 @@ class BaseHandler(RequestHandler):
     def authenticate_prometheus(self):
         return self.settings.get('authenticate_prometheus', True)
 
+    async def get_current_user_named_server_limit(self):
+        """
+        Return named server limit for current user.
+        """
+        named_server_limit_per_user = self.named_server_limit_per_user
+
+        if callable(named_server_limit_per_user):
+            return await maybe_future(named_server_limit_per_user(self))
+
+        return named_server_limit_per_user
+
     def get_auth_token(self):
         """Get the authorization token from Authorization header"""
         auth_header = self.request.headers.get('Authorization', '')
@@ -531,8 +542,6 @@ class BaseHandler(RequestHandler):
             '_xsrf',
             **clear_xsrf_cookie_kwargs,
         )
-        # Reset _jupyterhub_user
-        self._jupyterhub_user = None
 
     def _set_cookie(self, key, value, encrypted=True, **overrides):
         """Setting any cookie should go through here

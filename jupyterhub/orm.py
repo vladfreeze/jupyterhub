@@ -35,7 +35,6 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 from sqlalchemy.pool import StaticPool
-from sqlalchemy.sql.expression import bindparam
 from sqlalchemy.types import LargeBinary, Text, TypeDecorator
 from tornado.log import app_log
 
@@ -212,6 +211,8 @@ class Group(Base):
     __tablename__ = 'groups'
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(Unicode(255), unique=True)
+    # The properties column contains key:value pairs that represent group settings and their values. Example: {"ram": 8, "cpu": 4}
+    properties = Column(JSONDict, default={})
     users = relationship('User', secondary='user_group_map', backref='groups')
     properties = Column(JSONDict, default={})
 
@@ -997,7 +998,6 @@ def check_db_revision(engine):
     ).first()[0]
     if alembic_revision == head:
         app_log.debug("database schema version found: %s", alembic_revision)
-        pass
     else:
         raise DatabaseSchemaMismatch(
             "Found database schema version {found} != {head}. "
