@@ -20,8 +20,6 @@ from jupyterhub.app import JupyterHub
 project = "JupyterHub"
 author = "Project Jupyter Contributors"
 copyright = f"{datetime.date.today().year}, {author}"
-version = "%i.%i" % jupyterhub.version_info[:2]
-release = jupyterhub.__version__
 
 
 # -- General Sphinx configuration --------------------------------------------
@@ -39,7 +37,7 @@ extensions = [
     "myst_parser",
 ]
 root_doc = "index"
-source_suffix = [".md", ".rst"]
+source_suffix = [".md"]
 # default_role let's use use `foo` instead of ``foo`` in rST
 default_role = "literal"
 
@@ -48,10 +46,20 @@ default_role = "literal"
 # ref: https://myst-parser.readthedocs.io/en/latest/configuration.html
 #
 myst_heading_anchors = 2
+
 myst_enable_extensions = [
+    # available extensions: https://myst-parser.readthedocs.io/en/latest/syntax/optional.html
     "colon_fence",
     "deflist",
+    "fieldlist",
+    "substitution",
 ]
+
+myst_substitutions = {
+    # date example: Dev 07, 2022
+    "date": datetime.date.today().strftime("%b %d, %Y").title(),
+    "version": jupyterhub.__version__,
+}
 
 
 # -- Custom directives to generate documentation -----------------------------
@@ -180,12 +188,12 @@ linkcheck_ignore = [
     r"https://github.com/[^/]*$",  # too many github usernames / searches in changelog
     "https://github.com/jupyterhub/jupyterhub/pull/",  # too many PRs in changelog
     "https://github.com/jupyterhub/jupyterhub/compare/",  # too many comparisons in changelog
+    r"https?://(localhost|127.0.0.1).*",  # ignore localhost references in auto-links
 ]
 linkcheck_anchors_ignore = [
     "/#!",
     "/#%21",
 ]
-
 
 # -- Intersphinx -------------------------------------------------------------
 # ref: https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html#configuration
