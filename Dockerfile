@@ -18,13 +18,14 @@ RUN apt-get update && apt-get upgrade -yq\
    && apt-get clean \
    && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --upgrade setuptools pip build wheel
+RUN python3 -m pip install --upgrade setuptools pip build wheel \
+   && python3 -m pip install kubernetes
+
+WORKDIR /tmp/jupyterhub
+COPY . /tmp/jupyterhub/
 
 
-COPY . /src/jupyterhub/
-WORKDIR /src/jupyterhub
-
-WORKDIR /src/jupyterhub/jsx
+WORKDIR /tmp/jupyterhub/jsx
 # Build client component packages (they will be copied into ./share and
 # packaged with the built wheel.)
 RUN npm install --global yarn n
@@ -32,24 +33,25 @@ RUN n stable \
    && npm run build \
    && npm run place
 
-WORKDIR /src/jupyterhub
+WORKDIR /tmp/jupyterhub
 # Build client component packages ( will be copied into ./share and
 # packaged with the built wheel.)
 
 RUN python3 -m build --wheel \
-   && python3 -m pip wheel --wheel-dir wheelhouse dist/*.whl
+   && python3 -m pip wheel --wheel-dir /tmp/wheelhouse dist/*.whl
 
 
 FROM $BASE_IMAGE as base
 
 USER root
 
-COPY --from=builder /src/jupyterhub/wheelhouse /tmp/wheelhouse
+COPY --from=builder /tmp/wheelhouse /tmp/wheelhouse
 
 
 RUN python3 -m pip uninstall jupyterhub --yes \
     && python3 -m pip install --no-cache /tmp/wheelhouse/* \
-    && python3 -m pip install ldap3
+    && python3 -m pip install ldap3 \
+    && python3 -m pip install kubernetes
 
 RUN apt-get update && apt-get upgrade -yq \
    && apt-get purge -yq \
