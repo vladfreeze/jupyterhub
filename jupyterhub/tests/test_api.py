@@ -1702,8 +1702,8 @@ async def test_groups_list(app):
     r.raise_for_status()
     reply = r.json()
     assert reply == [
-        {'kind': 'group', 'name': 'alphaflight', 'users': [], 'roles': []},
-        {'kind': 'group', 'name': 'betaflight', 'users': [], 'roles': []},
+        {'kind': 'group', 'name': 'alphaflight', 'users': [], 'roles': [], 'properties':{}},
+        {'kind': 'group', 'name': 'betaflight', 'users': [], 'roles': [], 'properties':{}},
     ]
 
     # Test offset for pagination
@@ -1711,7 +1711,7 @@ async def test_groups_list(app):
     r.raise_for_status()
     reply = r.json()
     assert r.status_code == 200
-    assert reply == [{'kind': 'group', 'name': 'betaflight', 'users': [], 'roles': []}]
+    assert reply == [{'kind': 'group', 'name': 'betaflight', 'users': [], 'roles': [],'properties':{}}]
 
     r = await api_request(app, "groups?offset=10")
     r.raise_for_status()
@@ -1723,13 +1723,13 @@ async def test_groups_list(app):
     r.raise_for_status()
     reply = r.json()
     assert r.status_code == 200
-    assert reply == [{'kind': 'group', 'name': 'alphaflight', 'users': [], 'roles': []}]
+    assert reply == [{'kind': 'group', 'name': 'alphaflight', 'users': [], 'roles': [],'properties':{}}]
 
     # 0 is rounded up to 1
     r = await api_request(app, "groups?limit=0")
     r.raise_for_status()
     reply = r.json()
-    assert reply == [{'kind': 'group', 'name': 'alphaflight', 'users': [], 'roles': []}]
+    assert reply == [{'kind': 'group', 'name': 'alphaflight', 'users': [], 'roles': [],'properties':{}}]
 
 
 @mark.group
@@ -1772,6 +1772,7 @@ async def test_group_get(app):
         'name': 'alphaflight',
         'users': ['sasquatch'],
         'roles': [],
+        'properties':{},
     }
 
 
@@ -1889,6 +1890,63 @@ async def test_auth_managed_groups(request, app, group, user):
         data=json.dumps({"users": [user.name]}),
     )
     assert r.status_code == 400
+
+@mark.group
+async def test_group_edit_properties(app):
+    db = app.db
+    group = orm.Group(name='alphaflight')
+    app.db.add(group)
+    app.db.commit()
+    #Adding properties
+    r = await api_request(
+        app,
+        'groups/alphaflight/properties',
+        method='put',
+        data=json.dumps({"test_key":"test_value", "test_key2":"test_value2"}),
+    )
+    r.raise_for_status()
+
+    group = orm.Group.find(db, name='alphaflight')
+    assert sorted(u for u in group.properties) == sorted(["test_key","test_key2"])
+    assert sorted(u for u in group.properties.values()) == sorted(["test_value","test_value2"])
+    #Updating properties
+    r = await api_request(
+        app,
+        'groups/alphaflight/properties',
+        method='put',
+        data=json.dumps({"test_key_updated":"test_value_updated", "test_key2_updated":"test_value2_updated"}),
+    )
+    r.raise_for_status()
+
+    group = orm.Group.find(db, name='alphaflight')
+    assert sorted(u for u in group.properties) == sorted(["test_key_updated","test_key2_updated"])
+    assert sorted(u for u in group.properties.values()) == sorted(["test_value_updated","test_value2_updated"])
+
+
+    #Deleting properties
+    r = await api_request(
+        app,
+        'groups/alphaflight/properties',
+        method='put',
+        data=json.dumps({}),
+    )
+    r.raise_for_status()
+
+    group = orm.Group.find(db, name='alphaflight')
+    assert sorted(u for u in group.properties) == []
+    assert sorted(u for u in group.properties.values()) == []
+
+    #Wrong input
+
+    r = await api_request(
+        app,
+        'groups/alphaflight/properties',
+        method='put',
+        data=json.dumps([]),
+    )
+    assert r.status_code == 400
+
+
 
 
 # -----------------

@@ -1,103 +1,69 @@
-# An incomplete base Docker image for running JupyterHub
-#
-# Add your configuration to create a complete derivative Docker image.
-#
-# Include your configuration settings by starting with one of two options:
-#
-# Option 1:
-#
-# FROM jupyterhub/jupyterhub:latest
-#
-# And put your configuration file jupyterhub_config.py in /srv/jupyterhub/jupyterhub_config.py.
-#
-# Option 2:
-#
-# Or you can create your jupyterhub config and database on the host machine, and mount it with:
-#
-# docker run -v $PWD:/srv/jupyterhub -t jupyterhub/jupyterhub
-#
-# NOTE
-# If you base on jupyterhub/jupyterhub-onbuild
-# your jupyterhub_config.py will be added automatically
-# from your docker directory.
-
-ARG BASE_IMAGE=ubuntu:22.04
-FROM $BASE_IMAGE AS builder
-
+ARG BUILDER_IMAGE=python:3.9-buster
+ARG BASE_IMAGE=jupyterhub/k8s-hub:2.0.0
+FROM $BUILDER_IMAGE AS builder
 USER root
 
 ENV DEBIAN_FRONTEND noninteractive
-RUN apt-get update \
- && apt-get install -yq --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    locales \
-    python3-dev \
-    python3-pip \
-    python3-pycurl \
-    python3-venv \
-    nodejs \
-    npm \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --upgrade setuptools pip build wheel
-RUN npm install --global yarn
+RUN apt-get update && apt-get upgrade -yq\
+   && apt-get install -yq --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      locales \
+      python3-dev \
+      python3-pip \
+      python3-pycurl \
+      nodejs \
+      npm \
+   && apt-get clean \
+   && rm -rf /var/lib/apt/lists/*
 
-# copy everything except whats in .dockerignore, its a
-# compromise between needing to rebuild and maintaining
-# what needs to be part of the build
-COPY . /src/jupyterhub/
-WORKDIR /src/jupyterhub
+RUN python3 -m pip install --upgrade setuptools pip build wheel \
+   && python3 -m pip install kubernetes
 
+WORKDIR /tmp/jupyterhub
+COPY . /tmp/jupyterhub/
+
+
+WORKDIR /tmp/jupyterhub/jsx
 # Build client component packages (they will be copied into ./share and
 # packaged with the built wheel.)
-RUN python3 -m build --wheel
-RUN python3 -m pip wheel --wheel-dir wheelhouse dist/*.whl
+RUN npm install --global yarn n
+RUN n stable \
+   && npm run build \
+   && npm run place
+
+WORKDIR /tmp/jupyterhub
+# Build client component packages ( will be copied into ./share and
+# packaged with the built wheel.)
+
+RUN python3 -m build --wheel \
+   && python3 -m pip wheel --wheel-dir /tmp/wheelhouse dist/*.whl
 
 
-FROM $BASE_IMAGE
+FROM $BASE_IMAGE as base
 
 USER root
 
-ENV DEBIAN_FRONTEND=noninteractive
+COPY --from=builder /tmp/wheelhouse /tmp/wheelhouse
 
-RUN apt-get update \
- && apt-get install -yq --no-install-recommends \
-    ca-certificates \
-    curl \
-    gnupg \
-    locales \
-    python3-pip \
-    python3-pycurl \
-    nodejs \
-    npm \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
 
-ENV SHELL=/bin/bash \
-    LC_ALL=en_US.UTF-8 \
-    LANG=en_US.UTF-8 \
-    LANGUAGE=en_US.UTF-8
+RUN python3 -m pip uninstall jupyterhub --yes \
+    && python3 -m pip install --no-cache /tmp/wheelhouse/* \
+    && python3 -m pip install ldap3 \
+    && python3 -m pip install kubernetes
 
-RUN  locale-gen $LC_ALL
-
-# always make sure pip is up to date!
-RUN python3 -m pip install --no-cache --upgrade setuptools pip
-
-RUN npm install -g configurable-http-proxy@^4.2.0 \
- && rm -rf ~/.npm
-
-# install the wheels we built in the first stage
-COPY --from=builder /src/jupyterhub/wheelhouse /tmp/wheelhouse
-RUN python3 -m pip install --no-cache /tmp/wheelhouse/*
-
+RUN apt-get update && apt-get upgrade -yq \
+   && apt-get purge -yq \
+      vim \
+      vim-runtime \
+      vim-common \
+      git \
+      dnsutils \
+      libexpat1 \
+   && apt-get autoremove -yq && apt-get clean \
+   && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /srv/jupyterhub/
-WORKDIR /srv/jupyterhub/
+WORKDIR /srv/jupyterhub
+USER ${NB_USER}
 
-EXPOSE 8000
-
-LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
-LABEL org.jupyter.service="jupyterhub"
-
-CMD ["jupyterhub"]

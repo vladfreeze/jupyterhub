@@ -298,10 +298,14 @@ class JupyterHub(Application):
         return classes
 
     load_groups = Dict(
-        List(Unicode()),
-        help="""Dict of 'group': ['usernames'] to load at startup.
+        Dict(),
+        help="""Dict of {'group': {'users':['usernames'], properties : {}}  to load at startup.
 
-        This strictly *adds* groups and users to groups.
+        Example:
+
+            load_groups = {'groupname':{'users':[usernames], 'properties':{'key':'value'}}}
+
+        This strictly *adds* groups, users and properties to groups.
 
         Loading one set of groups, then starting JupyterHub again with a different
         set will not remove users or groups from previous launches.
@@ -322,7 +326,7 @@ class JupyterHub(Application):
                                 'scopes': ['users', 'groups'],
                                 'users': ['cyclops', 'gandalf'],
                                 'services': [],
-                                'groups': []
+                                'groups': []custom_scopes
                             }
                         ]
 
@@ -2049,17 +2053,24 @@ class JupyterHub(Application):
 
         if self.authenticator.manage_groups and self.load_groups:
             raise ValueError("Group management has been offloaded to the authenticator")
-        for name, usernames in self.load_groups.items():
+        for name, contents in self.load_groups.items():
             group = orm.Group.find(db, name)
+
             if group is None:
                 self.log.info(f"Creating group {name}")
                 group = orm.Group(name=name)
                 db.add(group)
-            for username in usernames:
-                username = self.authenticator.normalize_username(username)
-                user = await self._get_or_create_user(username)
-                self.log.debug(f"Adding user {username} to group {name}")
-                group.users.append(user)
+            if 'users' in contents:
+                for username in contents['users']:
+                    username = self.authenticator.normalize_username(username)
+                    user = await self._get_or_create_user(username)
+                    self.log.debug(f"Adding user {username} to group {name}")
+                    group.users.append(user)
+            if 'properties' in contents:
+                group_properties = contents['properties']
+                self.log.debug(f"Adding properties {group_properties} to group {name}")
+                group.properties = group_properties
+
         db.commit()
 
     async def init_role_creation(self):
@@ -2114,6 +2125,7 @@ class JupyterHub(Application):
             self._rbac_upgrade = True
         else:
             self._rbac_upgrade = False
+        
         for role in self.db.query(orm.Role).filter(
             orm.Role.name.notin_(init_role_names)
         ):

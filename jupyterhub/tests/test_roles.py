@@ -576,9 +576,9 @@ async def test_load_roles_services(tmpdir, request, preserve_scopes):
 async def test_load_roles_groups(tmpdir, request):
     """Test loading predefined roles for groups in app.py"""
     groups_to_load = {
-        'group1': ['gandalf'],
-        'group2': ['bilbo', 'gargamel'],
-        'group3': ['cyclops'],
+        'group1':{'users': ['gandalf'], 'properties': {}},
+        'group2':{'users':['bilbo', 'gargamel'], 'properties': {}},
+        'group3':{'users': ['cyclops'], 'properties': {}},
     }
     roles_to_load = [
         {
@@ -902,18 +902,20 @@ async def test_server_role_api_calls(
     assert r.status_code == response
 
 
-async def test_oauth_client_allowed_scopes(app):
-    allowed_scopes = ['read:users', 'read:groups']
+async def test_oauth_allowed_roles(app, create_temp_role):
+    allowed_roles = ['oracle', 'goose']
     service = {
         'name': 'oas1',
         'api_token': 'some-token',
-        'oauth_client_allowed_scopes': allowed_scopes,
+        'oauth_roles': ['oracle', 'goose'],
     }
+    for role in allowed_roles:
+        create_temp_role('read:users', role_name=role)
     app.services.append(service)
     app.init_services()
     app_service = app.services[0]
     assert app_service['name'] == 'oas1'
-    assert set(app_service['oauth_client_allowed_scopes']) == set(allowed_scopes)
+    assert set(app_service['oauth_roles']) == set(allowed_roles)
 
 
 async def test_user_group_roles(app, create_temp_role):
@@ -984,34 +986,6 @@ async def test_user_group_roles(app, create_temp_role):
     assert reply['name'] == 'jack'
     assert len(reply['roles']) == 1
     assert group_role.name not in reply['roles']
-
-
-async def test_config_role_list():
-    roles_to_load = [
-        {
-            'name': 'elephant',
-            'description': 'pacing about',
-            'scopes': ['read:hub'],
-        },
-        {
-            'name': 'tiger',
-            'description': 'pouncing stuff',
-            'scopes': ['shutdown'],
-        },
-    ]
-    hub = MockHub(load_roles=roles_to_load)
-    hub.init_db()
-    hub.authenticator.admin_users = ['admin']
-    await hub.init_role_creation()
-    for role_conf in roles_to_load:
-        assert orm.Role.find(hub.db, name=role_conf['name'])
-    # Now remove elephant from config and see if it is removed from database
-    roles_to_load.pop(0)
-    hub.load_roles = roles_to_load
-    await hub.init_role_creation()
-    assert orm.Role.find(hub.db, name='tiger')
-    assert not orm.Role.find(hub.db, name='elephant')
-
 
 async def test_config_role_users():
     role_name = 'painter'
@@ -1125,27 +1099,6 @@ async def test_custom_role_reset():
     assert user_role in user.roles
     assert 'shutdown' not in user_role.scopes
 
-
-async def test_removal_config_to_db():
-    role_spec = [
-        {
-            'name': 'user',
-            'scopes': ['self', 'shutdown'],
-        },
-        {
-            'name': 'wizard',
-            'scopes': ['self', 'read:groups'],
-        },
-    ]
-    hub = MockHub(load_roles=role_spec)
-    hub.init_db()
-    await hub.init_role_creation()
-    assert orm.Role.find(hub.db, 'user')
-    assert orm.Role.find(hub.db, 'wizard')
-    hub.load_roles = []
-    await hub.init_role_creation()
-    assert orm.Role.find(hub.db, 'user')
-    assert not orm.Role.find(hub.db, 'wizard')
 
 
 async def test_no_admin_role_change():
