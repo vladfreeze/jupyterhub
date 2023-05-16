@@ -48,6 +48,7 @@ RUN npm install --global yarn
 # compromise between needing to rebuild and maintaining
 # what needs to be part of the build
 COPY . /src/jupyterhub/
+
 WORKDIR /src/jupyterhub
 
 # Build client component packages (they will be copied into ./share and
@@ -87,17 +88,25 @@ RUN python3 -m pip install --no-cache --upgrade setuptools pip
 
 RUN npm install -g configurable-http-proxy@^4.2.0 \
  && rm -rf ~/.npm
-
+RUN python3 -m pip install dockerspawner
 # install the wheels we built in the first stage
 COPY --from=builder /src/jupyterhub/wheelhouse /tmp/wheelhouse
+
+COPY --from=builder /src/jupyterhub/custom-config /etc/jupyterhub/
 RUN python3 -m pip install --no-cache /tmp/wheelhouse/*
 
+
+RUN bash -l -c 'echo export SECRET_KEY_BASE="$(openssl rand -hex 64)" >> /etc/bash.bashrc'
+RUN /bin/bash -l -c 'echo export SECRET_KEY_BASE="$(openssl rand -hex 64)" > /etc/profile.d/docker_init.sh'
+
+ENV JUPYTERHUB_CRYPT_KEY=testvar
 RUN mkdir -p /srv/jupyterhub/
 WORKDIR /srv/jupyterhub/
 
-EXPOSE 8000
+EXPOSE 8888
 
 LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
 LABEL org.jupyter.service="jupyterhub"
+
 
 CMD ["jupyterhub"]
