@@ -71,7 +71,6 @@ c.DummyAuthenticator.manage_roles = True
 
 c.JupyterHub.ip = "127.0.0.1"
 c.JupyterHub.hub_ip = "0.0.0.0"
-c.DockerSpawner.image = "ghcr.io/austriandatalab/aocc_openscience_mage:sha-55e857d"
 c.DockerSpawner.network_name = "jupyterhub"
 c.DockerSpawner.remove = True
 c.DockerSpawner.volumes = {"jupyterhub-user-{username}": "/home/jovyan/work"}
