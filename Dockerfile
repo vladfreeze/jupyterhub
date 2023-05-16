@@ -95,11 +95,7 @@ COPY --from=builder /src/jupyterhub/wheelhouse /tmp/wheelhouse
 COPY --from=builder /src/jupyterhub/custom-config /etc/jupyterhub/
 RUN python3 -m pip install --no-cache /tmp/wheelhouse/*
 
-
-RUN bash -l -c 'echo export SECRET_KEY_BASE="$(openssl rand -hex 64)" >> /etc/bash.bashrc'
-RUN /bin/bash -l -c 'echo export SECRET_KEY_BASE="$(openssl rand -hex 64)" > /etc/profile.d/docker_init.sh'
-
-ENV JUPYTERHUB_CRYPT_KEY=testvar
+ENV JUPYTERHUB_CRYPT_KEY='d7d5e4765baaffba4b7b99d46c7b0a2cf5a5f8382fcd21530468d8460f45e429'
 RUN mkdir -p /srv/jupyterhub/
 WORKDIR /srv/jupyterhub/
 
