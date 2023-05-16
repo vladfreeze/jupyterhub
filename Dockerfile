@@ -19,7 +19,7 @@
 # NOTE
 # If you base on jupyterhub/jupyterhub-onbuild
 # your jupyterhub_config.py will be added automatically
-# from your docker directory..
+# from your docker directory.
 
 ARG BASE_IMAGE=ubuntu:22.04
 FROM $BASE_IMAGE AS builder
